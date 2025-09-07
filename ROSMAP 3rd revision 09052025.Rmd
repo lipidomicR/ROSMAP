@@ -1,0 +1,4120 @@
+---
+title: "ROSMAP 3rd revision"
+output: html_notebook
+editor_options: 
+  chunk_output_type: console
+---
+
+#loading library 
+```{r setup, include=FALSE}
+library(dplyr)
+library(agricolae)
+library(mixOmics)
+library(ggplot2)
+library(scales)
+library(tibble)
+library(tidyr)
+library(tidyverse)
+library(BiocGenerics) 
+library(Rtsne)
+library(WGCNA)
+library(sqldf)
+library(ggpubr)
+library(rstatix)
+library(strex) # extract nth number
+library(janitor) # row_to_names
+library(cowplot) # align multiple plots
+library(limma)
+library(ggrepel) # geom_text_repel
+library(WGCNA) # network
+library(Hmisc) # correlation
+library(igraph)
+library(tidygraph) # convert igraph to ggplot
+library(ggraph) # network plotting using ggplot2
+library(ggrepel)
+library(gridExtra)
+library(data.table)
+library(pheatmap) # heatmap
+library(RColorBrewer)
+library(ComplexHeatmap)
+library(ggheatmap)
+library(circlize)
+library(lipidr)
+
+library(broom) #anova
+# working directory
+#setwd("C:/cyc/ROSMAP publication/manuscript/ROSMAP/Submission/revision 3/Figure_R")
+
+#
+knitr::opts_knit$set(root.dir = "C:/cyc/ROSMAP publication/manuscript/ROSMAP/Submission/revision 3/Figure_R")
+getwd() # goes with notebook location
+```
+# loading data
+```{r}
+#=====loading lipidomic data=====
+#SERRF normalized data without duplicates and only features
+data<-read.csv("lipidomic_SERRF_AD phenotype.csv", check.names = FALSE)
+
+#AD classification
+AD_class<-data[, c(1:2)]
+
+#add colors to AD classification
+class <- as.factor(data$Class)
+ad_cols <- class
+levels(ad_cols) <-  c("tomato1", "seagreen3", "slateblue1")
+ad_cols <- as.character(ad_cols)
+
+# visualize SERFF_normalized data (boxplot)
+data_t<-data %>% dplyr::select(-Class) %>% column_to_rownames("patient id") %>% t() %>% data.frame
+
+boxplot(data_t, label=data$Class, col = ad_cols, main ="SERRF nomalized data")
+
+# log10
+data_t_log<-log(data_t+1) # data contains zero so do plus 1, then log10
+
+boxplot(data_t_log, label=data$Class, col = ad_cols, main ="SERRF nomalized_log data")
+
+#log and scale by feature
+data_t_log_scale<-scale(data_t_log, center=TRUE)
+
+boxplot(data_t_log_scale, label=data$Class, col = ad_cols, main ="SERRF nomalized_log_feature_centered data")
+
+
+#save(data, data_t_log,data_t_log_scale, file="ROSMAP_SREFF_normalized data.RData")
+
+#====clinical data=====
+data_c<-read.csv(file = "ROSMAP brain clinical traits.csv", header = TRUE, check.names = FALSE)
+
+cl_apoe<-read.csv(file="Copy of rosmapplasma_traits.csv")
+cl_ape_2<-read.csv(file="ROSMAP_clinical.csv")
+cl_apoe_1<-cl_apoe %>% distinct(projid, .keep_all = TRUE) 
+data_ape<-left_join(x=data_c,y=cl_ape_2, by="projid")
+data_ape$APOErisk<-as.factor(data_ape$APOErisk)
+data_ape$apoe_genotype<-as.factor(data_ape$apoe_genotype)
+data_ape$dcfdx_lv<-as.factor(data_ape$dcfdx_lv)
+data_ape$cogdx<-as.factor(data_ape$cogdx)
+data_ape$`CLASS:Condition`<-dplyr::recode(data_ape$`CLASS:Condition`, "Normal"="Control")
+data_ape$`CLASS:Condition`<-factor(data_ape$`CLASS:Condition`, levels=c("Control","AAD","SAD"))
+
+
+
+```
+# Figure 1
+# figure 1a workflow using biorender 
+# SERRF normalization (figure 1b and c)
+# figure 1d using graphic prism
+```{r SERRF normalization, echo=TRUE}
+# SERRF was used for batch normalization
+# C:\Users\cchen41\Documents\Shiny-SERRF-master/app.R
+# NEG and POS lipidomic data were normalized separately.
+# pos file location: C:\cyc\ROSMAP Brain\SERRF batch correction\04272022_SERRF\04272022_ROSMAP_Brain_pos_no SRM for SERRF.csv
+# neg file location: C:\cyc\ROSMAP Brain\SERRF batch correction\04272022_SERRF\04272022_ROSMAP_Brain_neg_no SRM for SERRF.csv
+# the results are in C:\cyc\ROSMAP Brain\SERRF batch correction\04272022_SERRF: folder neg_SERRF and pos_SERRF
+
+
+#======= negative======
+QC<-read.csv(file="QC_RSDs_neg.csv", row.names = 1, header=TRUE) 
+
+hist(QC$n, xlim=c(0,150), ylim= c(0,150), col='royalblue',border=F, main="ESI (-)", 
+     ylab="No. of Features", xlab="RSD (%)", cex.lab=1.2, cex.axis=1.2)
+
+hist(QC$s, add=TRUE, col=scales::alpha('red',.5),border=F, main="", breaks=seq(0, 150, 10))
+legend("topright", c("Raw", "SERRF"), fill=c("royalblue", "tomato1"), box.col ="white", cex=1.5)
+
+
+#======positive======
+QC<-read.csv(file="QC_RSDs.csv", row.names = 1) 
+
+hist(QC$n,xlim=c(0,300), ylim= c(0,200), col='royalblue',border=F, main="ESI (+)", 
+     ylab="No. of Features", xlab="RSD (%)", cex.lab=1.2, cex.axis=1.2, breaks=seq(0, 300, 20))
+hist(QC$s, add=TRUE, col=scales::alpha('red',.5),border=F, main="", breaks=seq(0, 300, 20))
+legend("topright", c("Raw", "SERRF"), fill=c("royalblue", "tomato1"), box.col ="white", cex=1.5)
+
+
+# ========PCA_POS_raw=======
+raw<-read.csv(file="04272022_ROSMAP_Brain_pos_no SRM for SERRF.csv", header=FALSE) 
+
+raw_t<-raw %>% t() %>% data.frame %>% row_to_names(row_number = 2) %>% dplyr::select(-time) 
+rownames(raw_t)<-NULL
+raw_t<-raw_t %>% column_to_rownames("label")
+raw_t[3:ncol(raw_t)]<-lapply(raw_t[3:ncol(raw_t)], as.numeric)
+pca <- prcomp(raw_t[,3:ncol(raw_t)], scale = TRUE)
+sum_pca<-summary(pca)
+pct<-sum_pca[["importance"]]
+
+#Build a data frame
+pcaData <- as.data.frame(pca$x[, 1:2]) # extract first two PCs
+pcaData <- cbind(pcaData, raw_t$batch, raw_t$sampleType) # add species to df
+colnames(pcaData) <- c("PC1", "PC2", "Batch","Type") # change column names
+a<-pcaData %>% mutate(data="Raw") %>% mutate(ESI="POS")
+
+#Plot
+ggplot(pcaData) +
+  aes(PC1, PC2, color = Batch, shape = Type) + # define plot area
+  geom_point(aes(size = Type)) + # adding data points
+  coord_fixed() + # fixing coordinates
+  theme_bw()+
+  xlab(paste0("PC1 (",round(100*pct[2,1],2),"%)"))+
+  ylab(paste0("PC2 (",round(100*pct[2,2],2),"%)"))+ ggtitle("POS_raw data")+
+  scale_size_manual(values=c(4,3), guide=FALSE)+
+  scale_shape_manual(values=c(18,21),label=c("QC","Sample"))+
+  guides(shape=guide_legend(override.aes = list(size=4)),
+         color=guide_legend(override.aes = list(size=4)))+
+  theme(legend.title = element_text(size=18),
+        legend.text=element_text(size=16),
+        axis.title = element_text(size=18),
+        axis.text = element_text(size=15),
+        panel.grid = element_blank(),legend.position = "none")
+
+# =======PCA_POS_normalization=======
+df_n<-read.csv(file="normalized by - SERRF_pos.csv") 
+
+df_n_t<-df_n %>% t() %>% data.frame %>% row_to_names(row_number = 1)
+df_n_t[]<-lapply(df_n_t[], as.numeric)
+
+pca <- prcomp(df_n_t, scale = TRUE)
+sum_pca<-summary(pca)
+pct<-sum_pca[["importance"]]
+#Build a data frame
+pcaData <- as.data.frame(pca$x[, 1:2]) # extract first two PCs
+pcaData <- cbind(pcaData, raw_t$batch, raw_t$sampleType) # add species to df
+colnames(pcaData) <- c("PC1", "PC2", "Batch","Type") # change column names
+b<-pcaData %>% mutate(data="SERRF") %>% mutate(ESI="POS")
+#Plot
+ggplot(pcaData) +
+  aes(PC1, PC2, color = Batch, shape = Type) + # define plot area
+  geom_point(aes(size = Type)) + # adding data points
+  coord_fixed() + # fixing coordinates
+  theme_bw()+
+  xlab(paste0("PC1 (",round(100*pct[2,1],2),"%)"))+
+  ylab(paste0("PC2 (",round(100*pct[2,2],2),"%)"))+
+  scale_size_manual(values=c(4,3), guide=FALSE)+
+  scale_shape_manual(values=c(18,21),label=c("QC","Sample"))+ ggtitle("POS_normalized data")+
+  guides(shape=guide_legend(override.aes = list(size=4)),
+         color=guide_legend(override.aes = list(size=4)))+
+  theme(legend.title = element_text(size=18),
+        legend.text=element_text(size=16),
+        axis.title = element_text(size=18),
+        axis.text = element_text(size=15),
+        panel.grid = element_blank(), legend.position = "none")
+
+#======= PCA_NEG_raw=======
+raw<-read.csv(file="04272022_ROSMAP_Brain_neg_no SRM for SERRF.csv", header=FALSE) 
+
+raw_t<-raw %>% t() %>% data.frame %>% row_to_names(row_number = 2) %>% dplyr::select(-time) 
+rownames(raw_t)<-NULL
+raw_t<-raw_t %>% column_to_rownames("label")
+raw_t[3:ncol(raw_t)]<-lapply(raw_t[3:ncol(raw_t)], as.numeric)
+pca <- prcomp(raw_t[,3:ncol(raw_t)], scale = TRUE)
+sum_pca<-summary(pca)
+pct<-sum_pca[["importance"]]
+#Build a data frame
+pcaData <- as.data.frame(pca$x[, 1:2]) # extract first two PCs
+pcaData <- cbind(pcaData, raw_t$batch, raw_t$sampleType) # add species to df
+colnames(pcaData) <- c("PC1", "PC2", "Batch","Type") # change column names
+c<-pcaData %>% mutate(data="Raw") %>% mutate(ESI="NEG")
+#Plot
+ggplot(pcaData) +
+  aes(PC1, PC2, color = Batch, shape = Type) + # define plot area
+  geom_point(aes(size = Type)) + # adding data points
+  coord_fixed() + # fixing coordinates
+  theme_bw()+
+  xlab(paste0("PC1 (",round(100*pct[2,1],2),"%)"))+
+  ylab(paste0("PC2 (",round(100*pct[2,2],2),"%)"))+ ggtitle("NEG_raw data")+
+  scale_size_manual(values=c(4,3), guide=FALSE)+
+  scale_shape_manual(values=c(18,21),label=c("QC","Sample"))+
+  guides(shape=guide_legend(override.aes = list(size=4)),
+         color=guide_legend(override.aes = list(size=4)))+
+  theme(legend.title = element_text(size=18),
+        legend.text=element_text(size=16),
+        axis.title = element_text(size=18),
+        axis.text = element_text(size=15),
+        panel.grid = element_blank(), legend.position = "none")
+
+# ======PCA_NEG_normalization======
+df_n<-read.csv(file="normalized by - SERRF_neg.csv") 
+
+df_n_t<-df_n %>% t() %>% data.frame %>% row_to_names(row_number = 1)
+df_n_t[]<-lapply(df_n_t[], as.numeric)
+
+pca <- prcomp(df_n_t, scale = TRUE)
+sum_pca<-summary(pca)
+pct<-sum_pca[["importance"]]
+#Build a data frame
+pcaData <- as.data.frame(pca$x[, 1:2]) # extract first two PCs
+pcaData <- cbind(pcaData, raw_t$batch, raw_t$sampleType) # add species to df
+colnames(pcaData) <- c("PC1", "PC2", "Batch","Type") # change column names
+d<-pcaData %>% mutate(data="SERRF") %>% mutate(ESI="NEG")
+#Plot
+ggplot(pcaData) +
+  aes(PC1, PC2, color = Batch, shape = Type) + # define plot area
+  geom_point(aes(size = Type)) + # adding data points
+  coord_fixed() + # fixing coordinates
+  theme_bw()+
+  xlab(paste0("PC1 (",round(100*pct[2,1],2),"%)"))+
+  ylab(paste0("PC2 (",round(100*pct[2,2],2),"%)"))+ ggtitle("NEG_normalized data")+
+  scale_size_manual(values=c(4,3), guide=FALSE)+
+  scale_shape_manual(values=c(18,21),label=c("QC","Sample"))+
+  guides(shape=guide_legend(override.aes = list(size=4)),
+         color=guide_legend(override.aes = list(size=4)))+
+  theme(legend.title = element_text(size=18),
+        legend.text=element_text(size=16),
+        axis.title = element_text(size=18),
+        axis.text = element_text(size=15),
+        panel.grid = element_blank(), legend.position = "none")
+
+#========combine all the modes with raw and normalized data=======
+all<-rbind(a,b,c,d)
+
+ggplot(all) +
+  aes(PC1, PC2, color = Type, shape = Batch) + # define plot area
+  geom_point(aes(size = Type)) + # adding data points
+  #coord_fixed() + # fixing coordinates
+  facet_grid(ESI~data, labeller = as_labeller(c("NEG"="ESI (-)","POS"="ESI (+)","Raw"="Raw","SERRF"="SERRF")), switch = "y")+
+  theme_bw()+
+  xlab("PC1")+
+  ylab("PC2")+
+  scale_color_manual(label=c("QC","Sample"), values=c("tomato1","grey"))+
+  scale_size_manual(values=c(3,2), guide=FALSE)+
+  scale_shape_manual(values=c(3,4,8,9,10))+
+  scale_y_continuous(position = "right")+
+  guides(shape=guide_legend(override.aes = list(size=4)),
+         color=guide_legend(override.aes = list(size=4)))+
+  theme(legend.title = element_text(size=20),
+        legend.text=element_text(size=18),
+        axis.title = element_text(size=18),
+        axis.text = element_text(size=15), strip.text = element_text(size=20),
+        panel.grid = element_blank(), panel.spacing = unit(1, "lines"))
+
+```
+# covariate adjustment using APOErisk, age and sex
+```{r}
+data_t<-data_t_log %>% t() %>% data.frame %>% rownames_to_column("NAME") # use log data
+
+colnames(data_t)[2:344]<-rownames(data.frame(data_t_log))
+
+data_clinical<-left_join(x=data_c,y=dplyr::select(df_ape,-APOErisk,-group), by="NAME")
+df_bmi$projid<-as.integer(df_bmi$projid)
+data_clinical<-left_join(x=data_clinical,y=dplyr::select(df_bmi,projid,bmi), by="projid")
+df<-left_join(x=data_clinical, y=data_t, by="NAME")
+
+# =====MANOVA TEST=====
+df<-df %>% relocate("projid", .before=Diagnosis) %>% dplyr::select(-DxNumeric,-ADonlyDxNumeric, -msex,-pmi)
+df_complete<-df
+df[6:369]<-lapply(df[6:369], as.numeric)
+df<-df_complete
+expression_matrix<-df[,c(27:369)]
+
+independent_cols <- colnames(df)[6:26]
+
+  independent_var_matrix <- do.call(cbind, df[independent_cols])
+  res.man <- manova(independent_var_matrix ~ df$`CLASS:Condition`, data = df)
+  manova_results <- summary(res.man)
+  summary.aov(res.man)
+
+# Create the design matrix including all covariates
+design <- model.matrix(~ `CLASS:Condition` + APOErisk + Sex + Age, data = df)
+rownames(design)<-df$NAME
+
+# Remove the effect of multiple covariates
+corrected_expression <- removeBatchEffect(t(expression_matrix), covariates = design[, c("APOErisk", "Age", "Sex")])
+
+# View the corrected expression values
+data_corrected<-corrected_expression %>% data.frame() %>% rownames_to_column("lipids") %>% t() %>% data.frame %>% row_to_names(row_number = 1)  # use for covariate adjusted data
+
+rownames(data_corrected)<-df$NAME
+
+```
+# Figure 2a,b,c
+# Figure S2
+# Figure 2d e f
+```{r}
+#===LOAD DATA====
+#for DE analysis
+data_corrected[]<-lapply(data_corrected, as.numeric)
+#data_corrected_scale<-scale(data_corrected)
+#data_corrected_scale<-as.data.frame(data_corrected_scale) 
+data_corrected_1<-data_clinical %>% left_join(rownames_to_column(data_corrected_scale,"NAME"),by="NAME") # for DE analysis and other statistical analysis
+
+data_corrected_t<-data_corrected_1[,c(1,31:373)] %>% t() %>% data.frame %>% row_to_names(row_number = 1) %>% rownames_to_column("NAME") %>% left_join(df_lipid_class[,c(1:11)], by="NAME") %>% relocate(lipid_class:total_db,.after=NAME)
+
+data_corrected_t[,c(4:327)]<-lapply(data_corrected_t[,c(4:327)], as.numeric)
+
+#for lipid class calculation
+data_corrected_2<-data_clinical %>% left_join(rownames_to_column(data_corrected,"NAME"),by="NAME")
+
+data_corrected_t_2<-data_corrected_2[,c(1,31:373)] %>% t() %>% data.frame %>% row_to_names(row_number = 1) %>% rownames_to_column("NAME") %>% left_join(df_lipid_class[,c(1:11)], by="NAME") %>% relocate(lipid_class:total_db,.after=NAME)
+
+data_corrected_t_2[,c(4:327)]<-lapply(data_corrected_t_2[,c(4:327)], as.numeric)
+
+#====sum the lipids in the corresponding lipid class=====
+df_i_n_sum<- data_corrected_t_2 %>% dplyr::select(NAME, lipid_class, starts_with("b")) %>% column_to_rownames("NAME") %>% group_by(lipid_class) %>%  summarise_all(list(sum)) %>% pivot_longer(-lipid_class) %>% pivot_wider(name, names_from = lipid_class) %>% mutate("LPC/PC"=LPC/PC) %>% mutate("LPE/PE"=LPE/PE) %>% mutate("PC/PE"=PC/PE) %>% mutate(Pls=PE_e+PE_p) %>% mutate("Cer/SM"=Cer/SM) %>% left_join(data_corrected_2[,c(1:2)], by=c("name"="NAME")) 
+
+df_i_n_sum_scaled<-scale(df_i_n_sum[,-c(1,20,21,22,24,25)])
+df_i_n_sum_scaled<-data.frame(df_i_n_sum_scaled)
+df_i_n_sum_1<-cbind(df_i_n_sum[,c(1,20,21,22,24,25)],df_i_n_sum_scaled)
+
+df_sum_long<-  df_i_n_sum_1 %>% relocate(`CLASS:Condition`,.after=name) %>% pivot_longer(names_to = "lipid_class", cols=`LPC/PC`:Pls) %>% arrange(lipid_class, 'CLASS:Condition') %>% group_by(lipid_class) 
+
+df_sum_long_1<-df_sum_long %>% filter(!lipid_class %in% c("LPE","LPC","LPC/PC","LPE/PE"))
+
+df_sum_long_1$lipid_class<-factor(df_sum_long_1$lipid_class, levels=c("AcCa", "Cer", "GSL","SM","ChE", "MAG",    "DAG", "TAG","PC","PE","PS","PI","PG","PC_e","PE_e","PE_p","Pls","PC/PE"))
+
+colnames(df_sum_long_1)[2]<-"Class"
+colnames(df_sum_long)[2]<-"Class"
+
+df_sum_long_1$Class<-recode(df_sum_long_1$Class,"Normal"="Control")
+df_sum_long$Class<-recode(df_sum_long$Class,"Normal"="Control")
+
+#=====plot use for relabel=====
+df_sum_long_1$Class<-factor(df_sum_long_1$Class, levels=c("Control","AAD","SAD"))
+palette = c("seagreen3","tomato1", "slateblue1")
+df_sum_long$Class<-factor(df_sum_long$Class, levels=c("Control","AAD","SAD"))
+palette = c("seagreen3","tomato1", "slateblue1")
+
+df_sum_long_2<-df_sum_long %>% filter(lipid_class %in% c("LPE","LPC","LPC/PC","LPE/PE"))
+
+plot_list<-list()
+for (i in unique(df_sum_long$lipid_class)) {
+  
+  tmp<-df_sum_long %>% filter(lipid_class==i)
+
+ 
+  bxp<-ggboxplot(
+  tmp, x = "Class", y = "value", color = "Class",lwd=1.3, width=0.8, notch=TRUE,
+  palette = c("seagreen3","tomato1", "slateblue1"),
+  ncol=8, add="jitter",outlier.shape = NA,order = c("Control", "AAD", "SAD"), title=paste0(i), 
+  short.panel.labs = FALSE, xlab="", ylab="Log(Sum)"
+)+
+  scale_color_manual(labels=c("Control", "AAD", "SAD"), values= c("seagreen3","tomato1", "slateblue1"), guide=FALSE)+
+  theme(legend.position = "right", axis.text.x = element_text(size=22), axis.text.y = element_text(size=20), 
+        axis.title = element_text(size=22), plot.title = element_text(size=26))+ 
+    #scale_y_continuous(expand=c(0,0.9))+
+
+  stat_compare_means(method = "wilcox.test",step.increase = 0.1, tip.length = 0.05, size = 6,
+                     
+                     comparisons=list(c("Control","AAD"), c("AAD", "SAD"), c("Control", "SAD")))
+
+plot_list[[i]] <- bxp
+}
+print(plot_list)
+
+
+#======plot Figure 2b and c=====
+a=ggplot(filter(df_sum_long_2, lipid_class=="LPC"), aes(x = Class, y = value,color = Class))+geom_boxplot(notch = TRUE, notchwidth = 0.5, size=1)+xlab("")+ylab("Scaled log(Sum)")+geom_jitter(alpha=0.6)+ggtitle("LPC")+
+  scale_color_manual(labels=c("Control", "AAD", "SAD"), values= c("seagreen3","tomato1", "slateblue1"), guide=FALSE)+
+   scale_y_continuous(limits=c(-3,4))+
+   theme_bw() +
+  theme(legend.position = "right", 
+        axis.text.x = element_text(size=26), 
+        axis.text.y = element_text(size=24), 
+        strip.background = element_blank(),
+        strip.text = element_text(size=26),
+        axis.title = element_text(size=26), 
+        plot.title = element_text(size=28), 
+        panel.grid = element_blank(), 
+        axis.line.x.bottom = element_line(color = 'black'),
+    axis.line.y.left   = element_line(color = 'black'),
+    axis.line.y.right  = element_blank(),
+    axis.text.y.right  = element_blank(),
+    axis.ticks.y.right = element_blank(),
+    panel.border       = element_blank())+
+    geom_bracket(xmin=c("Control","AAD"), xmax=c("SAD","SAD"), label = c("p=0.0045","p=0.012"), y.position=c(3.83,2.7), vjust=-0.3,
+               bracket.linetype = "solid", color = "black", size = 0.8,label.size=7)
+
+b=ggplot(filter(df_sum_long_2, lipid_class=="LPE"), aes(x = Class, y = value,color = Class))+geom_boxplot(notch = TRUE, notchwidth = 0.5, size=1)+xlab("")+ylab("Scaled log(Sum)")+geom_jitter(alpha=0.6)+ggtitle("LPE")+
+  scale_color_manual(labels=c("Control", "AAD", "SAD"), values= c("seagreen3","tomato1", "slateblue1"), guide=FALSE)+
+   scale_y_continuous(limits=c(-3.5,3.5), breaks=c(-3,-1.5,0,1.5,3))+
+   theme_bw() +
+  theme(legend.position = "right", 
+       axis.text.x = element_text(size=26), 
+        axis.text.y = element_text(size=24), 
+        strip.background = element_blank(),
+        strip.text = element_text(size=26),
+        axis.title = element_text(size=26), 
+        plot.title = element_text(size=28), 
+        panel.grid = element_blank(), 
+        axis.line.x.bottom = element_line(color = 'black'),
+    axis.line.y.left   = element_line(color = 'black'),
+    axis.line.y.right  = element_blank(),
+    axis.text.y.right  = element_blank(),
+    axis.ticks.y.right = element_blank(),
+    panel.border       = element_blank())+
+    geom_bracket(xmin=c("Control","AAD"), xmax=c("SAD","SAD"), label = c("p=0.021","p=0.041"), y.position=c(3.15,2.15), vjust=-0.3,
+               bracket.linetype = "solid", color = "black", size = 0.8,label.size=7)
+
+
+c=ggplot(filter(df_sum_long_2, lipid_class=="LPC/PC"), aes(x = Class, y = value,color = Class))+geom_boxplot(notch = TRUE, notchwidth = 0.5, size=1)+xlab("")+ylab("Ratio")+geom_jitter(alpha=0.6)+ggtitle("LPC/PC")+
+  scale_color_manual(labels=c("Control", "AAD", "SAD"), values= c("seagreen3","tomato1", "slateblue1"), guide=FALSE)+
+   scale_y_continuous(limits=c(0.12,0.145))+
+   theme_bw() +
+  theme(legend.position = "right", 
+        axis.text.x = element_text(size=26), 
+        axis.text.y = element_text(size=24), 
+        strip.background = element_blank(),
+        strip.text = element_text(size=26),
+        axis.title = element_text(size=26), 
+        plot.title = element_text(size=28), 
+        panel.grid = element_blank(), 
+        axis.line.x.bottom = element_line(color = 'black'),
+    axis.line.y.left   = element_line(color = 'black'),
+    axis.line.y.right  = element_blank(),
+    axis.text.y.right  = element_blank(),
+    axis.ticks.y.right = element_blank(),
+    panel.border       = element_blank())+
+    geom_bracket(xmin=c("Control","AAD"), xmax=c("SAD","SAD"), label = c("p=0.00085","p=0.0071"), y.position=c(0.143,0.140), vjust=-0.3,
+               bracket.linetype = "solid", color = "black", size = 0.8,label.size=7)
+
+d=ggplot(filter(df_sum_long_2, lipid_class=="LPE/PE"), aes(x = Class, y = value,color = Class))+geom_boxplot(notch = TRUE, notchwidth = 0.5, size=1)+xlab("")+ylab("Ratio")+geom_jitter(alpha=0.6)+ggtitle("LPE/PE")+
+  scale_color_manual(labels=c("Control", "AAD", "SAD"), values= c("seagreen3","tomato1", "slateblue1"), guide=FALSE)+
+#  scale_y_continuous(limits=c(0.28,0.325))+
+   theme_bw() +
+  theme(legend.position = "right", 
+       axis.text.x = element_text(size=26), 
+        axis.text.y = element_text(size=24), 
+        strip.background = element_blank(),
+        strip.text = element_text(size=26),
+        axis.title = element_text(size=26), 
+        plot.title = element_text(size=28), 
+        panel.grid = element_blank(), 
+        axis.line.x.bottom = element_line(color = 'black'),
+    axis.line.y.left   = element_line(color = 'black'),
+    axis.line.y.right  = element_blank(),
+    axis.text.y.right  = element_blank(),
+    axis.ticks.y.right = element_blank(),
+    panel.border       = element_blank())+
+    geom_bracket(xmin=c("Control","AAD"), xmax=c("SAD","SAD"), label = c("p=0.25","p=0.056"), y.position=c(0.313,0.308), vjust=-0.3,
+               bracket.linetype = "solid", color = "black", size = 0.8,label.size=7)
+
+ggarrange(a,b, nrow=1, ncol=2, widths = c(1,1.1))
+ggarrange(c,d, nrow=1, ncol=2)
+
+#======plot Figure S2=====
+# Based on the plot_log, modifiy the figiures for better visualization
+
+notch_plot <- function(x, title = "LPC/PC", ylab = "Ratio", limits = NULL) {
+  if (is.null(limits)) {
+    limits <- c(min(x$value, na.rm = TRUE), max(x$value, na.rm = TRUE))
+  }
+  
+  ggplot(x, aes(x = Class, y = value, color = Class)) +
+    geom_boxplot(notch = TRUE, notchwidth = 0.5, size = 1, outlier.shape = NA) +
+    xlab("") +
+    ylab(ylab) +
+    geom_jitter(alpha = 0.6, size = 2) +
+    ggtitle(title) +
+    scale_color_manual(labels = c("Control", "AAD", "SAD"), values = c("seagreen3", "tomato1", "slateblue1"), guide = FALSE) +
+    scale_y_continuous(expand = c(0, 0.2), limits = limits) +
+    theme_bw() +
+    theme(
+      axis.text.x = element_text(size = 24),
+      axis.text.y = element_text(size = 22),
+      strip.background = element_blank(),
+      strip.text = element_text(size = 24),
+      axis.title = element_text(size = 24),
+      plot.title = element_text(size = 26),
+      panel.grid = element_blank(),
+      axis.line.x.bottom = element_line(color = 'black'),
+      axis.line.y.left = element_line(color = 'black'),
+      axis.line.y.right = element_blank(),
+      axis.text.y.right = element_blank(),
+      axis.ticks.y.right = element_blank(),
+      panel.border = element_blank()
+    )
+}
+
+p1=notch_plot(filter(df_sum_long_1,lipid_class=="AcCa"),title="AcCa", ylab="Scaled log(Sum)", limits=NULL)
+p1
+
+p2=ggplot(filter(df_sum_long_1,lipid_class=="Cer"),aes(x = Class, y = value,color = Class))+geom_boxplot(notch = TRUE, notchwidth = 0.5, size=1, outlier.shape = NA)+xlab("")+ylab("Scaled log(Sum)")+geom_jitter(alpha=0.6, size=2)+ggtitle("Cer")+
+  scale_color_manual(labels=c("Control", "AAD", "SAD"), values= c("seagreen3","tomato1", "slateblue1"), guide=FALSE)+
+   scale_y_continuous(expand=c(0,0.2))+
+   theme_bw() +
+  theme(
+        axis.text.x = element_text(size=24), 
+        axis.text.y = element_text(size=22), 
+        strip.background = element_blank(),
+        strip.text = element_text(size=24),
+        axis.title = element_text(size=24), 
+        plot.title = element_text(size=26), 
+        panel.grid = element_blank(), 
+        axis.line.x.bottom = element_line(color = 'black'),
+    axis.line.y.left   = element_line(color = 'black'),
+    axis.line.y.right  = element_blank(),
+    axis.text.y.right  = element_blank(),
+    axis.ticks.y.right = element_blank(),
+    panel.border       = element_blank())+
+geom_bracket(xmin="Control", xmax="SAD", label = "p=0.047", y.position=3.2,vjust=0, bracket.linetype = "solid", color = "black", size = 0.8,label.size=6)
+p2
+
+p3=notch_plot(filter(df_sum_long_1,lipid_class=="ChE"),title="ChE", ylab="Scaled log(Sum)", limits = c(-4,3))
+p3
+
+p4=notch_plot(filter(df_sum_long_1,lipid_class=="MAG"),title="MAG", ylab="Scaled log(Sum)", limits=c(-3,2))
+p4
+
+p5=notch_plot(filter(df_sum_long_1,lipid_class=="DAG"),title="DAG", ylab="Scaled log(Sum)", limits=c(-3,2.5))
+p5
+
+p6=notch_plot(filter(df_sum_long_1,lipid_class=="TAG"),title="TAG", ylab="Scaled log(Sum)", limits=NULL)
+p6
+
+p7=notch_plot(filter(df_sum_long_1,lipid_class=="GSL"),title="GSL", ylab="Scaled log(Sum)", limits=NULL)
+p7
+
+p8=notch_plot(filter(df_sum_long_1,lipid_class=="SM"),title="SM", ylab="Scaled log(Sum)", limits=NULL)
+p8
+
+p9=notch_plot(filter(df_sum_long_1,lipid_class=="PG"),title="PG", ylab="Scaled log(Sum)", limits=c(-3,2.5))+
+geom_bracket(xmin="Control", xmax="SAD", label = "p=0.094", y.position=2.3,vjust=0, bracket.linetype = "solid", color = "black", size = 0.8,label.size=6, tip.length=0.02)
+p9
+
+p10=notch_plot(filter(df_sum_long_1,lipid_class=="PI"),title="PI", ylab="Scaled log(Sum)", limits=c(-4,4))+
+geom_bracket(xmin="Control", xmax="SAD", label = "p=0.056", y.position=3.5,vjust=0, bracket.linetype = "solid", color = "black", size = 0.8,label.size=6, tip.length=0.02)
+p10
+
+p11=notch_plot(filter(df_sum_long_1,lipid_class=="PS"),title="PS", ylab="Scaled log(Sum)", limits=c(-3,4))+
+geom_bracket(xmin=c("Control","AAD"), xmax=c("SAD","SAD"), label = c("p=0.047", "p=0.058"), y.position=c(3.5,3),vjust=0, bracket.linetype = "solid", color = "black", size = 0.8,label.size=6, tip.length=0.02)
+p11
+
+p12=notch_plot(filter(df_sum_long_1,lipid_class=="PE_e"),title="PE_e", ylab="Scaled log(Sum)", limits=c(-3,3))
+p12
+
+p13=notch_plot(filter(df_sum_long_1,lipid_class=="PE_p"),title="PE_p", ylab="Scaled log(Sum)", limits=c(-3,3))+
+geom_bracket(xmin="Control", xmax="SAD", label = "p=0.075", y.position=2.5,vjust=0, bracket.linetype = "solid", color = "black", size = 0.8,label.size=6, tip.length=0.02)
+p13
+
+p14=notch_plot(filter(df_sum_long_1,lipid_class=="PC_e"),title="PC_e", ylab="Scaled log(Sum)", limits=c(-3,3))+
+geom_bracket(xmin="Control", xmax="SAD", label = "p=0.021", y.position=2.5,vjust=0, bracket.linetype = "solid", color = "black", size = 0.8,label.size=6, tip.length=0.02)
+p14
+
+p15=notch_plot(filter(df_sum_long_1,lipid_class=="Pls"),title="Pls", ylab="Scaled log(Sum)", limits=c(-3,3))+
+geom_bracket(xmin="Control", xmax="SAD", label = "p=0.097", y.position=2.5,vjust=0, bracket.linetype = "solid", color = "black", size = 0.8,label.size=6, tip.length=0.02)
+p15
+
+p16=notch_plot(filter(df_sum_long_1,lipid_class=="PE"),title="PE", ylab="Scaled log(Sum)", limits=c(-4,4))+
+geom_bracket(xmin=c("Control","AAD"), xmax=c("SAD","SAD"), label = c("p=0.0075", "p=0.08"), y.position=c(3.5,3),vjust=0, bracket.linetype = "solid", color = "black", size = 0.8,label.size=6, tip.length=0.02)
+p16
+
+p17=notch_plot(filter(df_sum_long_1,lipid_class=="PC"),title="PC", ylab="Scaled log(Sum)", limits=c(-3,3))+
+geom_bracket(xmin=c("Control","AAD"), xmax=c("SAD","SAD"), label = c("p=0.035", "p=0.054"), y.position=c(2.5,2),vjust=0, bracket.linetype = "solid", color = "black", size = 0.8,label.size=6, tip.length=0.02)
+p17
+
+p18=ggplot(filter(df_sum_long_1,lipid_class=="PC/PE"),aes(x = Class, y = value,color = Class))+geom_boxplot(notch = TRUE, notchwidth = 0.5, size=1, outlier.shape = NA)+xlab("")+ylab("Ratio")+geom_jitter(alpha=0.6, size=2)+ggtitle("PC/PE")+
+  scale_color_manual(labels=c("Control", "AAD", "SAD"), values= c("seagreen3","tomato1", "slateblue1"), guide=FALSE)+
+   scale_y_continuous(breaks=c(1.55,1.58,1.6))+
+   theme_bw() +
+  theme(
+        axis.text.x = element_text(size=24), 
+        axis.text.y = element_text(size=22), 
+        strip.background = element_blank(),
+        strip.text = element_text(size=24),
+        axis.title = element_text(size=24), 
+        plot.title = element_text(size=26), 
+        panel.grid = element_blank(), 
+        axis.line.x.bottom = element_line(color = 'black'),
+    axis.line.y.left   = element_line(color = 'black'),
+    axis.line.y.right  = element_blank(),
+    axis.text.y.right  = element_blank(),
+    axis.ticks.y.right = element_blank(),
+    panel.border       = element_blank())+
+geom_bracket(xmin=c("Control","Control"), xmax=c("AAD","SAD"), label = c("p=0.013", "p=0.056"), y.position=c(1.603,1.610),vjust=0, bracket.linetype = "solid", color = "black", size = 0.8,label.size=6, tip.length=0.02)
+p18
+
+
+combined_plots <- lapply(1:18, function(i) get(paste0("p", i)))
+plot_grid(plotlist = combined_plots, ncol = 3) 
+
+#====complexheatmap Figure 2a=====
+
+df_c_1[,c(2:28)]<-lapply(df_c_1[,c(2:28)], as.numeric)
+
+column_ha<-HeatmapAnnotation(Diagnosis=my_sample_col$Diagnosis,
+                             Braak=df_c_1$Braak,
+                             Reagan=df_c_1$Reagan,
+                             CERAD=df_c_1$CERAD,
+                             gpath=df_c_1$gpath,
+                             Tangles=df_c_1$tangles,
+                             Amyloid=df_c_1$amyloid,
+                             GlobalCogFun=df_c_1$GlobalCogFunc,
+                             col=list(Diagnosis=c(SAD="slateblue1", Control="seagreen3", AAD="tomato1"),
+                                      Braak = c("0"="#EDF8FB","1"="#CCECE6","2"="#99D8C9","3"="#66C2A4","4"="#41AE76","5"="#238B45","6"="#005824"),                                                                    gpath=colorRamp2(c(0,1,2,3),c("#ede5cf", "#cd8c7a", "#b26166","#541f3f")),
+                                      GlobalCogFun = colorRamp2(c(min(df_c_1$GlobalCogFunc),0, max(df_c_1$GlobalCogFunc)), c("#7FCDBB","#2C7FB8", "#253494")),
+                                      Reagan=c("1"="#FFFFD4","2"="#FED98E","3"="#FE9929","4"="#CC4C02"),
+                                      CERAD=c("1"="#feebe2","2"="#f768a1","3"="#c51b8a","4"="#7a0177"),
+                                      Amyloid=colorRamp2(c(0,5,10,15,20,25), c("white","#F3ABA4","#F8968C","#E04E3D","#CF191A","#9C0824")),
+                                      Tangles=colorRamp2(c(0,10,20,30), c("white","#B7D4E9","#78A5CA","#416F9B"))),
+                                     annotation_legend_param=list(
+                                                 title_gp = gpar(fontsize = 18), title_position="topleft",
+                                                 labels_gp = gpar(fontsize = 16), ncol=1, height = unit(25, "mm")),
+                             annotation_name_gp= gpar(fontsize = 17.5)
+ ) 
+col_fun = colorRamp2(c(-8, 0, 4), c("blue", "white", "red"))
+
+
+
+ht1=ComplexHeatmap::Heatmap(df,cluster_rows = TRUE, cluster_columns = TRUE, name="Z-score", col=col_fun, top_annotation = column_ha,row_names_gp = gpar(fontsize = 18), heatmap_legend_param = list(
+    legend_direction = "horizontal", title_position = "lefttop", title_gp=gpar(fontsize=18), labels_gp=gpar(fontsize=16),
+    legend_width = unit(4, "cm")))
+draw(ht1, heatmap_legend_side="bottom", annotation_legend_side="right",
+           legend_grouping="original")
+
+
+#====lipidr enrichment analysis=====
+data_corrected_log<-data_clinical %>% left_join(rownames_to_column(data_corrected,"NAME"),by="NAME")
+
+df_lipidr<-data_corrected_log[,c(1,31:373)] %>% t() %>% data.frame %>% row_to_names(row_number = 1)
+df_lipidr[]<-lapply(df_lipidr, as.numeric)
+#write to csv for lipid name arragement
+#write.csv(df_lipidr,"data_corrected_lipidr.csv")
+
+d <- as_lipidomics_experiment(read.csv("data_corrected_lipidr.csv"))
+sample_id<-dplyr::select(data_corrected_log, c(1:2))
+colnames(sample_id)<-c("sample","Type")
+sample_id$Type<-recode(sample_id$Type, "Normal"="Control")
+d <- add_sample_annotation(d, sample_id)
+plot_lipidclass(d, "boxplot", log=FALSE)
+#d_summarized = summarize_transitions(d, method = "average")
+
+#mvaresults = mva(d, measure="Area", method="PCA")
+#plot_mva(mvaresults, color_by="Type", components = c(1,2))
+
+
+de_results = de_analysis(
+  data=d, 
+  SAD-Control, AAD-Control, SAD-AAD, measure="Area")
+head(de_results)
+
+
+plot_results_volcano(de_results, show.labels = TRUE)
+
+enrich_results = lsea(de_results, rank.by = "logFC", min_size = 4,nperm=10000)
+
+significant_lipidsets(enrich_results)
+plot_enrichment(de_results, significant_lipidsets(enrich_results), annotation="class")+ 
+  scale_x_discrete(labels=c("AcCa","Cer","ChE", "DAG", "GSL",
+    "LPC", "LPE", "MAG", "PC", "PE", "PG", "PI", "LPE_e", "PC_e", "PE_e", "PE_p", "PS", "SM", "TAG" ))+
+  scale_color_manual(values = c(`Not significant`="black", `Significant`="tomato1"),
+                                labels=c("p<0.05", "p>0.05"))+
+  coord_flip()+theme_bw()+theme(strip.text.x = element_text(size = 14), strip.background = element_blank(), 
+                                axis.text.x = element_text(size=10), axis.title = element_text(size=16), 
+                                legend.text = element_text(size=14), legend.title = element_text(size=14), 
+                                axis.text.y = element_text(size=14),axis.title.x =element_text(size=14),
+                                axis.title.y =element_text(size=14))
+
+plot_enrichment(de_results, significant_lipidsets(enrich_results), annotation="length")+ 
+  scale_color_manual(values = c(`Not significant`="royalblue", `Significant`="tomato1"),
+                     labels=c("p>0.05", "p<0.05"))+
+  coord_flip()+theme_bw()+theme(strip.text.x = element_text(size = 20), strip.background = element_blank(), 
+                                axis.text.x = element_text(size=13), axis.title = element_text(size=20), 
+                                legend.text = element_text(size=20), legend.title = element_text(size=20), 
+                                axis.text.y = element_text(size=18))
+
+plot_enrichment(de_results, significant_lipidsets(enrich_results), annotation="unsat")+ 
+  scale_color_manual(values = c(`Not significant`="royalblue", `Significant`="tomato1"),
+                     labels=c("p>0.05", "p<0.05"))+
+  coord_flip()+theme_bw()+theme(strip.text.x = element_text(size = 14), strip.background = element_blank(), 
+                                axis.text.x = element_text(size=13), axis.title = element_text(size=20), 
+                                legend.text = element_text(size=20), legend.title = element_text(size=20), 
+                                axis.text.y = element_text(size=16))
+
+#====heat map for lipid class enrichment Figure 2d======
+de_results_class<-de_results %>% group_by(Class,contrast) %>% summarise(mean=mean(logFC)) %>%
+  dplyr::select(Class,contrast,mean) %>% mutate(contrast=gsub(" - ","_",contrast)) %>% pivot_wider(names_from = "contrast", values_from = "mean") %>% dplyr::select(Class, `AAD_Control`,`SAD_AAD`,`SAD_Control`) %>% filter(!Class=="plasmanylLPE") %>% column_to_rownames("Class")
+
+rownames(de_results_class)<-c("AcCa","Cer","ChE","DG","GSL","LPC","LPE","MG","PC","PE","PG","PI","PS","SM","TG","PC_e","PE_e","PE_p" )
+
+de_results_class<-de_results_class[c("AcCa","Cer","SM","GSL","LPC","LPE","PC","PE","PS","PG","PI","PC_e","PE_e","PE_p","ChE","MG","DG","TG"),]
+
+rownames(de_results_class)[18]<-"TAG"
+rownames(de_results_class)[17]<-"DAG"
+rownames(de_results_class)[16]<-"MAG"
+
+
+df_class_p<-enrich_results %>% filter(str_detect(set,"Class")) %>% dplyr::select(contrast,set,pval) %>% mutate(contrast=gsub(" - ","_",contrast)) %>% pivot_wider(names_from = "contrast", values_from = "pval") %>% dplyr::select(set, `AAD_Control`,`SAD_AAD`,`SAD_Control`) %>% mutate(set=gsub("Class_","",set)) %>% column_to_rownames("set")
+
+
+other_class_p<-data.frame(`AAD_Control`=rep(1,3),`SAD_AAD`=rep(1,3),`SAD_Control`=rep(1,3))
+rownames(other_class_p)<-c("AcCa","ChE","MG")
+
+df_class_p<-rbind(df_class_p,other_class_p)
+rownames(df_class_p)
+rownames(df_class_p)<-c("TG","LPC","LPE","GSL", "PE","PE_e","PC","PC_e","DG","Cer","PS","PG","PI","PE_p","SM","AcCa","ChE","MG")
+
+df_class_p<-df_class_p[c("AcCa","Cer","SM","GSL","LPC","LPE","PC","PE","PS","PG","PI","PC_e","PE_e","PE_p","ChE","MG","DG","TG"),]
+
+rownames(df_class_p)[18]<-"TAG"
+rownames(df_class_p)[17]<-"DAG"
+rownames(df_class_p)[16]<-"MAG"
+
+df1<-as.matrix(de_results_class)
+df2<-as.matrix(df_class_p)
+cols = colorRampPalette(c("royalblue","white", "tomato1"))(10)
+
+
+ComplexHeatmap::pheatmap(df1, cluster_cols = FALSE, cluster_rows = FALSE, 
+         gaps_col = c(1,2), cellwidth=17, cellheight=15, fontsize=14, 
+         angle_col = c("45"), color =cols, row_names_side = c("left"), column_names_side=c("top"), 
+         heatmap_legend_param = list(title="Log(FC)", title_gp = gpar(fontsize = 14), labels_gp=gpar(fontsize=12)),
+cell_fun = function(j, i, x, y, w, h, fill) {
+    if(df2[i, j] < 0.001) {
+        grid.text("***", x, y)
+    } else if(df2[i, j] < 0.01) {
+        grid.text("**", x, y)
+    } else if(df2[i, j] < 0.05) {
+        grid.text("*", x, y)
+    }
+  
+})
+# horizontal
+df1_transposed <- t(df1)
+df2_transposed <- t(df2)
+
+ht1<-ComplexHeatmap::pheatmap(df1_transposed, 
+    cluster_cols = FALSE, 
+    cluster_rows = FALSE,
+    gaps_row = seq(1,2,1), 
+    cellwidth = 22, 
+    cellheight = 20, 
+    fontsize = 16, 
+    angle_col = "90",  
+    color = cols, 
+    row_names_side = c("left"), 
+    column_names_side = c("top"),  # Change annotation to bottom
+    column_title="Lipid class",
+    column_title_gp = gpar(fontsize = 18),
+    heatmap_legend_param = list(
+        title = "Log(FC)", 
+        title_gp = gpar(fontsize = 14), 
+        labels_gp = gpar(fontsize = 12), legend_direction = "horizontal"  # Make legend horizontal
+        
+    ),
+    cell_fun = function(j, i, x, y, w, h, fill) {
+        if(df2_transposed[i, j] < 0.001) {
+            grid.text("***", x, y)
+        } else if(df2_transposed[i, j] < 0.01) {
+            grid.text("**", x, y)
+        } else if(df2_transposed[i, j] < 0.05) {
+            grid.text("*", x, y)
+        }
+    }
+)
+
+draw(ht1, heatmap_legend_side = "bottom")
+
+
+#====heat map for double bond enrichment Figure 2e======
+de_results_db<-de_results %>% group_by(total_cs,contrast) %>% summarise(mean=mean(logFC)) %>%
+  dplyr::select(total_cs,contrast,mean) %>% mutate(contrast=gsub(" - ","_",contrast)) %>% pivot_wider(names_from = "contrast", values_from = "mean") %>% dplyr::select(total_cs, `AAD_Control`,`SAD_AAD`,`SAD_Control`) %>% column_to_rownames("total_cs")
+
+
+df_db_p<-enrich_results %>% filter(str_detect(set,"total_cs")) %>% dplyr::select(contrast,set,pval) %>% mutate(contrast=gsub(" - ","_",contrast)) %>% pivot_wider(names_from = "contrast", values_from = "pval") %>% dplyr::select(set, `AAD_Control`,`SAD_AAD`,`SAD_Control`) %>% mutate(set=gsub("total_cs_","",set)) %>% column_to_rownames("set")
+
+
+df_db_p<-df_db_p[c("0","1","2","3","4","5","6","7","8","9","10","11","12"),]
+
+df1<-as.matrix(de_results_db)
+df2<-as.matrix(df_db_p)
+
+ComplexHeatmap::pheatmap(df1, cluster_cols = FALSE, cluster_rows = FALSE, 
+         gaps_col = c(1,2), cellwidth=17, cellheight=15, fontsize=14, 
+         angle_col = c("45"), color =cols, row_names_side = c("left"), row_title ="Double bond", column_names_side=c("top"), 
+         heatmap_legend_param = list(title="Log(FC)", title_gp = gpar(fontsize = 14), labels_gp=gpar(fontsize=12)),
+cell_fun = function(j, i, x, y, w, h, fill) {
+    if(df2[i, j] < 0.001) {
+        grid.text("***", x, y)
+    } else if(df2[i, j] < 0.01) {
+        grid.text("**", x, y)
+    } else if(df2[i, j] < 0.05) {
+        grid.text("*", x, y)
+    }
+  
+})
+# horizontal
+df1_transposed <- t(df1)
+df2_transposed <- t(df2)
+
+ht1<-ComplexHeatmap::pheatmap(df1_transposed, 
+    cluster_cols = FALSE, 
+    cluster_rows = FALSE,
+    gaps_row = seq(1,2,1), 
+    cellwidth = 22, 
+    cellheight = 20, 
+    fontsize = 14, 
+    angle_col = "45",  
+    color = cols, 
+    row_names_side = c("left"), 
+    column_title ="Double bond",
+    column_title_gp = gpar(fontsize = 16),
+    column_names_side = c("top"),  # Change annotation to bottom
+  
+    heatmap_legend_param = list(
+        title = "Log(FC)", 
+        title_gp = gpar(fontsize = 14), 
+        labels_gp = gpar(fontsize = 12), legend_direction = "horizontal"  # Make legend horizontal
+        
+    ),
+    cell_fun = function(j, i, x, y, w, h, fill) {
+        if(df2_transposed[i, j] < 0.001) {
+            grid.text("***", x, y)
+        } else if(df2_transposed[i, j] < 0.01) {
+            grid.text("**", x, y)
+        } else if(df2_transposed[i, j] < 0.05) {
+            grid.text("*", x, y)
+        }
+    }
+)
+
+draw(ht1, heatmap_legend_side = "bottom")
+
+#====heat map for chain length enrichment Figure 2f======
+de_results_cl<-de_results %>% group_by(total_cl,contrast) %>% summarise(mean=mean(logFC)) %>%
+  dplyr::select(total_cl,contrast,mean) %>% mutate(contrast=gsub(" - ","_",contrast)) %>% pivot_wider(names_from = "contrast", values_from = "mean") %>% dplyr::select(total_cl, `AAD_Control`,`SAD_AAD`,`SAD_Control`) %>% column_to_rownames("total_cl")
+
+rownames(de_results_cl)
+
+df_cl_p<-enrich_results %>% filter(str_detect(set,"total_cl")) %>% dplyr::select(contrast,set,pval) %>% mutate(contrast=gsub(" - ","_",contrast)) %>% pivot_wider(names_from = "contrast", values_from = "pval") %>% dplyr::select(set, `AAD_Control`,`SAD_AAD`,`SAD_Control`) %>% mutate(set=gsub("total_cl_","",set)) %>% column_to_rownames("set")
+
+rownames(df_cl_p)
+other_cl_p<-data.frame(`AAD_Control`=rep(1,17),`SAD_AAD`=rep(1,17),`SAD_Control`=rep(1,17))
+rownames(other_cl_p)<-c( "15","26","27","28","30","31","45","46","47","48","49","50", "51","52","53","55","62")
+
+df_cl_p<-rbind(df_cl_p,other_cl_p)
+
+df_cl_p<-df_cl_p[c("15", "16", "18", "20", "22", "26", "27", "28", "30", "31", "32", "33", "34", "35", "36", "37", "38", "39", "40", "41", "42", "43", "44", "45", "46", "47", "48", "49", "50", "51", "52", "53", "54", "55", "56", "58", "60", "62"),]
+
+df1<-as.matrix(de_results_cl)
+df2<-as.matrix(df_cl_p)
+
+
+ComplexHeatmap::pheatmap(df1, cluster_cols = FALSE, cluster_rows = FALSE, 
+         gaps_col = c(1,2), cellwidth=17, cellheight=15, fontsize=14, 
+         angle_col = c("45"), color =cols, row_names_side = c("left"), row_title ="Acyl chain length", column_names_side=c("top"), 
+         heatmap_legend_param = list(title="Log(FC)", title_gp = gpar(fontsize = 14), labels_gp=gpar(fontsize=12)),
+cell_fun = function(j, i, x, y, w, h, fill) {
+    if(df2[i, j] < 0.001) {
+        grid.text("***", x, y)
+    } else if(df2[i, j] < 0.01) {
+        grid.text("**", x, y)
+    } else if(df2[i, j] < 0.05) {
+        grid.text("*", x, y)
+    }
+  
+})
+# horizontal
+df1_transposed <- t(df1)
+df2_transposed <- t(df2)
+
+ht1<-ComplexHeatmap::pheatmap(df1_transposed, 
+    cluster_cols = FALSE, 
+    cluster_rows = FALSE,
+    gaps_row = seq(1,2,1), 
+    cellwidth = 22, 
+    cellheight = 20, 
+    fontsize = 16, 
+    angle_col = "45",  
+    color = cols, 
+    row_names_side = c("left"), 
+    column_title ="Acyl chain length",
+    column_title_gp = gpar(fontsize = 20),
+    column_names_side = c("top"),  # Change annotation to bottom
+  
+    heatmap_legend_param = list(
+        title = "Log(FC)", 
+        title_gp = gpar(fontsize = 14), 
+        labels_gp = gpar(fontsize = 12), legend_direction = "horizontal"  # Make legend horizontal
+        
+    ),
+    cell_fun = function(j, i, x, y, w, h, fill) {
+        if(df2_transposed[i, j] < 0.001) {
+            grid.text("***", x, y)
+        } else if(df2_transposed[i, j] < 0.01) {
+            grid.text("**", x, y)
+        } else if(df2_transposed[i, j] < 0.05) {
+            grid.text("*", x, y)
+        }
+    }
+)
+
+draw(ht1, heatmap_legend_side = "bottom")
+
+```
+# Figure 3a
+# Figure 3b,c,d
+```{r}
+#======Figure 3a======
+# RUN ANOVA 
+
+df<-data_corrected_1 %>% dplyr::select(`CLASS:Condition`, 31:373)
+df_count<-df %>% group_by(`CLASS:Condition`) %>% dplyr::count()
+df_count
+results_list <- list()
+for(i in 2:ncol(df))
+{
+
+column <- names(df[i])
+#tidy will summarise and return neat format
+avz <- broom::tidy(kruskal.test(df[,i] ~ `CLASS:Condition`, data = df))
+
+# Add this condition if you only want aov with P < 0.05 printed
+#if(avz$p.value[1] < 0.05) {
+
+  
+#   print(column)
+#  print(avz)
+# Add the results to the list
+    results_list[[column]] <- avz
+  
+ }
+
+
+results_list <- list()
+p_values <- c()
+
+for(i in 2:ncol(df)) {
+  column <- names(df)[i]
+  avz <- broom::tidy(kruskal.test(df[,i] ~ `CLASS:Condition`, data = df))
+  
+  # Store the p-value
+  p_values <- c(p_values, avz$p.value[1])
+  
+  results_list[[column]] <- avz
+}
+
+# Adjust the p-values
+adjusted_p_values <- p.adjust(p_values, method = "BH")
+
+# Add adjusted p-values to the results
+for(column in names(results_list)) {
+  results_list[[column]]$adjusted_p.value <- adjusted_p_values[which(names(results_list) == column)]
+}
+
+
+
+# Combine the results into one dataframe
+combined_results <- do.call(rbind, lapply(names(results_list), 
+                                       function(i){ data.frame(lipids=i, results_list[[i]])}))
+
+mean_results <- df %>%
+  group_by(`CLASS:Condition`) %>%
+  summarise(across(everything(), mean, na.rm = TRUE)) %>% 
+  t() %>% data.frame %>% row_to_names(row_number = 1) %>%
+  rownames_to_column("lipids")
+
+
+group_comparison<-combined_results %>% 
+  left_join(mean_results, by="lipids") %>%
+  arrange(adjusted_p.value) %>% dplyr::slice(1:50) %>% 
+  mutate(lipid_class=case_when(str_detect(lipids,"LPE")~ "LPE",
+                               str_detect(lipids,"PE")~ "PE",
+                               str_detect(lipids,"LPC")~ "LPC",
+                               str_detect(lipids,"PC")~ "PC",
+                               str_detect(lipids,"PI")~ "PI",
+                               str_detect(lipids,"PS")~ "PS",
+                               str_detect(lipids,"TG")~ "TAG",
+                               str_detect(lipids,"Hex")~ "GSL",
+                               str_detect(lipids,"Cer")~ "Cer")) %>%
+  mutate(neg_logP=-log(p.value,10)) %>%     
+  dplyr::select(lipids,lipid_class,Normal,AAD,SAD,neg_logP,adjusted_p.value) %>% arrange(lipid_class)
+
+group_comparison[,c(3:5)]<-lapply(group_comparison[,c(3:5)], as.numeric)
+
+
+#=====new analysis after covariate adjustment =======
+col_fun1 = colorRamp2(c(-0.3, 0, 0.3), c("royalblue1", "white", "tomato1"))
+col_fun2 = colorRamp2(c(1.2, 1.3, 2 , 3), c("white","orange", "seagreen3", "pink"))
+mat2<-group_comparison[,c(1,2,3)] %>% column_to_rownames("lipids") %>% dplyr::select(-lipid_class)
+
+mat3<-group_comparison[,c(1,2,3,4,5)] %>% column_to_rownames("lipids")
+split<-group_comparison$lipid_class
+
+split=factor(split, levels=c("Cer", 
+                             "GSL", 
+                             "LPC",
+                             "PC", 
+                             "LPE",
+                             "PE", 
+                             "PI", 
+                             "PS",
+                             "TAG"))
+
+p_value<-group_comparison$neg_logP
+
+circos.par(start.degree = 55, gap.after = c(4, 4, 4, 4, 4, 4, 4, 4, 30))
+
+
+circos.heatmap(mat2, col = col_fun1, rownames.side = "outside", rownames.cex = 1, split=split,
+               bg.border="black", track.height = 0.1, cell.border = "grey",cell_width = rep(3,50))
+circos.heatmap(mat3[,3], col = col_fun1, bg.border="black", track.height = 0.07, cell.border = "grey")
+circos.heatmap(mat3[,4], col = col_fun1, bg.border="black", track.height = 0.07, cell.border = "grey")
+circos.heatmap(p_value, col = col_fun2, bg.border="black", track.height = 0.05, cell.border = "grey", dend.side = "inside"
+               )
+
+lgd_mat2= Legend(title = "Z score", col_fun = col_fun1, grid_width = unit(6, "mm"), 
+                 title_position="topcenter", labels_gp = gpar(fontsize = 15), title_gp=gpar(fontsize=17), title_gap = unit(5, "mm"))
+
+lgd_p_value= Legend(title = "P value", col_fun = col_fun2, grid_width = unit(6, "mm"), title_position="topleft", 
+                    at = c(1.3, 2, 3), labels = c("0.05", "0.01", "0.001"), labels_gp = gpar(fontsize = 15), title_gap = unit(10, "mm"),
+                    title_gp=gpar(fontsize=17))
+
+# Define a viewport for the bottom left corner
+bottom_left_vp <- viewport(x =0.1, y = 0.0, width = 0.4, height = 0.3, just = c("left", "bottom"))
+
+# Push the bottom left viewport
+pushViewport(bottom_left_vp)
+
+# Create a layout within the bottom left viewport to arrange legends side by side
+pushViewport(viewport(layout = grid.layout(1, 2, widths = unit(c(0.25, 0.25), "npc"), just=c("left","top"))))
+
+# Draw the first legend in the first column
+pushViewport(viewport(layout.pos.col = 1))
+grid.draw(lgd_mat2)
+popViewport()
+
+# Draw the second legend in the second column
+pushViewport(viewport(layout.pos.col = 2))
+grid.draw(lgd_p_value)
+popViewport(2)  # Pop twice to return to the main viewport
+
+
+## ignore if manually added
+# label"Normal"
+circos.text(track.index = 1,get.cell.meta.data("cell.xlim")-mean(get.cell.meta.data("cell.xlim"))/2,
+            get.cell.meta.data("cell.ylim")-max(get.cell.meta.data("cell.ylim"))/2, labels = "Control",facing = "bending.inside", 
+            niceFacing = TRUE, adj = c(-1.7,0.6),cex = 1.4)
+# label"AAD"
+circos.text(track.index = 2,get.cell.meta.data("cell.xlim")-mean(get.cell.meta.data("cell.xlim"))/2,
+            get.cell.meta.data("cell.ylim")-2*max(get.cell.meta.data("cell.ylim")), labels = "AAD",facing = "bending.inside", 
+            niceFacing = TRUE, adj = c(-2.1,0.4),cex=1.4)
+# label"SAD"
+circos.text(track.index = 2,get.cell.meta.data("cell.xlim")-mean(get.cell.meta.data("cell.xlim"))/2,
+            get.cell.meta.data("cell.ylim")-2*max(get.cell.meta.data("cell.ylim")), labels = "SAD",facing = "bending.inside", 
+            niceFacing = TRUE, adj = c(-2.1,2.7),cex=1.4)
+# p value
+circos.text(track.index = 3,get.cell.meta.data("cell.xlim")-mean(get.cell.meta.data("cell.xlim"))/2,
+            get.cell.meta.data("cell.ylim")-2*max(get.cell.meta.data("cell.ylim")), labels = "P",facing = "bending.inside", 
+            niceFacing = TRUE, adj = c(-5.4,3.0),cex=1.4)
+
+
+#circos.clear()
+
+
+#======Differential expression analysis======
+
+#for DE analysis
+data_corrected[]<-lapply(data_corrected, as.numeric)
+#data_corrected_scale<-scale(data_corrected)
+#data_corrected_scale<-as.data.frame(data_corrected_scale) 
+data_corrected_1<-data_clinical %>% left_join(rownames_to_column(data_corrected,"NAME"),by="NAME") # for DE analysis and other statistical analysis
+
+data_corrected_t<-data_corrected_1[,c(1,31:373)] %>% t() %>% data.frame %>% row_to_names(row_number = 1) %>% rownames_to_column("NAME") %>% left_join(df_lipid_class[,c(1:11)], by="NAME") %>% relocate(lipid_class:total_db,.after=NAME)
+
+data_corrected_t[,c(4:327)]<-lapply(data_corrected_t[,c(4:327)], as.numeric)
+
+df_1<-data_corrected_1[,c(1,2,31:373)]
+
+f<-factor(df_1$`CLASS:Condition`, levels=c("Normal","AAD","SAD")) # change to Control later
+
+design<-model.matrix(~0+f, data=df_1)
+rownames(design)<-df_1$NAME
+
+df_1_t<-df_1[,-c(1:2)] %>% t() %>% data.frame
+#df_1_t<-log(df_1_t,2)
+
+fit=lmFit(df_1_t, design)
+
+contrast=makeContrasts(F1=fSAD-fNormal, 
+                       F2=fAAD-fNormal,
+                       F3=fSAD-fAAD, levels=design)
+
+fit1<-contrasts.fit(fit, contrast) 
+fit2 <- eBayes(fit1)
+result <- topTable(fit2, number = Inf, sort.by = "none")
+
+#extract results
+  limma_res_F1 = topTable(fit2,coef = 1,
+                        number = Inf, sort.by = "none", confint=TRUE)
+  limma_res_F2 = topTable(fit2,coef = 2,
+                        number = Inf, sort.by = "none", confint=TRUE)
+  limma_res_F3 = topTable(fit2,coef = 3,
+                        number = Inf, sort.by = "none", confint=TRUE)
+# =====Figure 3b,c,d======
+# SAD vs control
+res<-limma_res_F1
+dea_res_l<-res %>% mutate(threshold=case_when(P.Value<0.05 ~ "sig",
+                                       P.Value>0.05 ~ "in_sig")) %>%
+                         mutate(color_label=case_when(P.Value>0.05 ~ "In_sig",
+                                                      P.Value<0.05 & logFC<0 ~ "Down",
+                                                      P.Value<0.05 & logFC>0 ~ "Up"
+                                                      )) %>% 
+                   rownames_to_column("feature_ID") %>% 
+                   mutate(log=-1*log10(P.Value))
+
+ 
+dea_res_l$color_label<-factor(dea_res_l$color_label, levels=c("Up", "Down", "In_sig"))
+dea_res_l$feature_ID<-gsub("TG","TAG",dea_res_l$feature_ID)
+
+p=ggplot(data = dea_res_l, aes(x = logFC, y =log, label=feature_ID))+
+  geom_point(aes(color=color_label), size=2)+
+  #geom_text(data=dea_res_l %>% filter(raw_p<=0.05), aes(label=feature_ID), check_overlap=TRUE,   
+  #          size=2.5, nudge_x=0.2)+
+  xlab("Log2 Fold Change")+
+  ylab("-Log10(P_value)")+
+  #scale_x_continuous(breaks=c(-0.05, -0.01, 0, 0.01, 0.05))+
+  scale_color_manual(name="", values=c("royalblue", "grey"), labels=c("Down", "In_sig"))+theme_bw()+ ggtitle("SAD vs. Control")+
+  theme(axis.title.x.bottom = element_text(size=24, margin=margin(10,0,0,0)),
+        axis.title.y.left = element_text(size=24, margin=margin(0,10,0,0)),
+        axis.text = element_text(size=22),
+        legend.text=element_text(size=22), 
+        #panel.background = element_rect(fill="white", linetype = "solid", size=0.5, color="black"),
+        panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank(),
+        legend.background = element_rect(fill="transparent"), legend.spacing.y = unit(0.2,"cm"), legend.position="top",plot.title = element_text(size=30, hjust=0.5)
+  ) +guides(color = guide_legend(byrow = TRUE, override.aes = list(size = 6)))+ 
+  geom_text_repel(data=subset(dea_res_l, log>1.8), size=5, aes(label=feature_ID), ylim = c(1.8, 4.2), xlim = c(-0.5,-0.25), box.padding=0.5, point.padding=0.5, nudge_x=0.1,
+                    segment.color="grey", direction = "y", max.overlaps=50)+
+  
+  geom_text_repel(data=subset(dea_res_l, log<1.8&log>1.3), size=5, aes(label=feature_ID), ylim = c(0, 4), xlim = c(0.25,0.5),
+                   box.padding=0.7, point.padding=0.5, segment.color="grey", direction = "y", max.overlaps=50)+
+  geom_vline(xintercept = 0, linetype="dotdash", color="grey55", size=1)+
+  scale_x_continuous(limits = c(-0.5, 0.5))
+
+p
+# AAD vs control
+res<-limma_res_F2
+dea_res_l<-res %>% mutate(threshold=case_when(P.Value<0.05 ~ "sig",
+                                       P.Value>0.05 ~ "in_sig")) %>%
+                         mutate(color_label=case_when(P.Value>0.05 ~ "In_sig",
+                                                      P.Value<0.05 & logFC<0 ~ "Down",
+                                                      P.Value<0.05 & logFC>0 ~ "Up"
+                                                      )) %>% 
+                   rownames_to_column("feature_ID") %>% 
+                   mutate(log=-1*log10(P.Value))
+
+ 
+dea_res_l$color_label<-factor(dea_res_l$color_label, levels=c("Up", "Down", "In_sig"))
+dea_res_l$feature_ID<-gsub("TG","TAG",dea_res_l$feature_ID)
+
+p=ggplot(data = dea_res_l, aes(x = logFC, y =log, label=feature_ID))+
+  geom_point(aes(color=color_label), size=2)+
+  #geom_text(data=dea_res_l %>% filter(raw_p<=0.05), aes(label=feature_ID), check_overlap=TRUE,   
+  #          size=2.5, nudge_x=0.2)+
+  xlab("Log2 Fold Change")+
+  ylab("-Log10(P_value)")+
+  #scale_x_continuous(breaks=c(-0.05, -0.01, 0, 0.01, 0.05))+
+  scale_color_manual(name="", values=c("royalblue", "grey"), labels=c("Down", "In_sig"))+theme_bw()+ ggtitle("AAD vs. Control")+
+  theme(axis.title.x.bottom = element_text(size=24, margin=margin(10,0,0,0)),
+        axis.title.y.left = element_text(size=24, margin=margin(0,10,0,0)),
+        axis.text = element_text(size=22),
+        legend.text=element_text(size=22), 
+        #panel.background = element_rect(fill="white", linetype = "solid", size=0.5, color="black"),
+        panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank(),
+        legend.background = element_rect(fill="transparent"), legend.spacing.y = unit(0.2,"cm"), legend.position="top",plot.title = element_text(size=30, hjust=0.5)
+  ) +guides(color = guide_legend(byrow = TRUE, override.aes = list(size = 6)))+ geom_text_repel(data=subset(dea_res_l, P.Value<0.05 & logFC<(-0.25)), size=5, aes(label=feature_ID), ylim = c(NA, 2.2), xlim = c(0,-0.3), box.padding=0.25, point.padding=0.2,
+                    segment.color="grey", direction = "y", max.overlaps=50)+
+  geom_text_repel(data=subset(dea_res_l, P.Value<0.05& logFC>(-0.25)), size=5, aes(label=feature_ID), ylim = c(0, NA), xlim = c(0,0.3),
+                   box.padding=0.7, point.padding=0.5, segment.color="grey", direction = "both", max.overlaps=50)+
+  geom_vline(xintercept = 0, linetype="dotdash", color="grey55", size=1)+
+  scale_x_continuous(limits = c(-0.5, 0.5))
+
+p
+
+# SAD vs AAD
+res<-limma_res_F3
+dea_res_l<-res %>% mutate(threshold=case_when(P.Value<0.05 ~ "sig",
+                                       P.Value>0.05 ~ "in_sig")) %>%
+                         mutate(color_label=case_when(P.Value>0.05 ~ "In_sig",
+                                                      P.Value<0.05 & logFC<0 ~ "Down",
+                                                      P.Value<0.05 & logFC>0 ~ "Up"
+                                                      )) %>% 
+                   rownames_to_column("feature_ID") %>% 
+                   mutate(log=-1*log10(P.Value))
+
+ 
+dea_res_l$color_label<-factor(dea_res_l$color_label, levels=c("Up", "Down", "In_sig"))
+dea_res_l$feature_ID<-gsub("TG","TAG",dea_res_l$feature_ID)
+
+p=ggplot(data = dea_res_l, aes(x = logFC, y =log, label=feature_ID))+
+  geom_point(aes(color=color_label), size=2)+
+  #geom_text(data=dea_res_l %>% filter(raw_p<=0.05), aes(label=feature_ID), check_overlap=TRUE,   
+  #          size=2.5, nudge_x=0.2)+
+  xlab("Log2 Fold Change")+
+  ylab("-Log10(P_value)")+
+  #scale_x_continuous(breaks=c(-0.05, -0.01, 0, 0.01, 0.05))+
+  scale_color_manual(name="", values=c("tomato1","royalblue", "grey"), labels=c("Up","Down", "In_sig"))+theme_bw()+ ggtitle("SAD vs. AAD")+
+  theme(axis.title.x.bottom = element_text(size=24, margin=margin(10,0,0,0)),
+        axis.title.y.left = element_text(size=24, margin=margin(0,10,0,0)),
+        axis.text = element_text(size=22),
+        legend.text=element_text(size=22), 
+        #panel.background = element_rect(fill="white", linetype = "solid", size=0.5, color="black"),
+        panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank(),
+        legend.background = element_rect(fill="transparent"), legend.spacing.y = unit(0.2,"cm"), legend.position="top",plot.title = element_text(size=30, hjust=0.5)
+  ) +guides(color = guide_legend(byrow = TRUE, override.aes = list(size = 6)))+ geom_text_repel(data=subset(dea_res_l, P.Value<0.05 & logFC<0), size=5, aes(label=feature_ID), ylim = c(-0.3, 2.5), xlim = c(-0.15,-0.5), box.padding=0.6, point.padding=0.2,nudge_x=-0.15,
+                    segment.color="grey", direction = "y", max.overlaps=50)+
+  geom_text_repel(data=subset(dea_res_l, P.Value<0.05& logFC>0), size=5, aes(label=feature_ID), ylim = c(0, NA), xlim = c(0,0.3),
+                   box.padding=0.7, point.padding=0.5, segment.color="grey", direction = "y", max.overlaps=50)+
+  geom_vline(xintercept = 0, linetype="dotdash", color="grey55", size=1)+
+  scale_x_continuous(limits = c(-0.5, 0.5))
+
+p
+
+```
+#mixomics for lipidomic (single omic analysis)_316 samples_Figure 3e and 3f for manuscript
+#Figure 3e and f (mixomics-single omic)
+#Figure S8
+```{r mixomics for lipidomic (single omic analysis), echo=TRUE, fig.height=4, fig.width=4}
+
+# =====loading the data sets=====
+lipidomics<-data_corrected_1%>% column_to_rownames("NAME") %>% dplyr::select(`1_Hex1Cer(d18:1_24:2)`:`PS(27:0)`)
+
+clinical<-data_corrected_1%>% column_to_rownames("NAME") %>% dplyr::select(GlobalCogFunc:bmi)
+
+
+# convert to numeric matrix
+L<-as.matrix(lipidomics)
+
+# group
+T<-factor(data_corrected_1$`CLASS:Condition`, levels= c("Normal","AAD", "SAD")) # The order will follow alphabetically.
+
+# list
+ROSMAP<- list(L, T)
+names(ROSMAP)=c("lipidomics", "types")
+
+X<-ROSMAP$lipidomics
+Y<-ROSMAP$types
+dim(X) # check the dimensions of the X dataframe
+summary(Y)  # check the distribution of class labels
+
+# PCA
+pca.ROSMAP = pca(X, ncomp = 10, center = TRUE, scale = TRUE) 
+plot(pca.ROSMAP)  # barplot of the eigenvalues (explained variance per component)
+
+plotIndiv(pca.ROSMAP, group = ROSMAP$types, ind.names = FALSE, # plot the samples projected
+          legend = TRUE, title = 'PCA', X.label='PC1: 27%', Y.label = 'PC2: 5%',
+          col = c("tomato1", "seagreen3", "slateblue1"), legend.position = "right",
+          style = "ggplot2", pch = c(16,16,16),
+          size.legend=23, size.legend.title=23, size.xlabel=23, layout = NULL,
+          size.ylabel=23, size.axis=23) # onto the PCA subspace
+
+#PLS-DA
+result.plsda.ROSMAP <- plsda(X, Y) # run the method
+plotIndiv(result.plsda.ROSMAP, ind.names = FALSE, ellipse = TRUE, legend = FALSE, comp = 1:2,
+          col = c("tomato1", "seagreen3", "slateblue1"), legend.position = "right",
+          style = "ggplot2", pch = c(16,16,16),star=TRUE, group = Y,
+          size.legend=23, size.legend.title=23, size.xlabel=23, layout = NULL,
+          size.ylabel=23, size.axis=23, title= "PLS-DA", size.title = 23, legend.title = "")
+
+
+# sPLS-DA
+ROSMAP.splsda<- splsda(X, Y, ncomp = 10)  # set ncomp to 10 for performance assessment later
+
+x=plotIndiv(ROSMAP.splsda, comp = 1:2, 
+          group = ROSMAP$types, ind.names = FALSE,  # colour points by class
+          ellipse = TRUE, # include 95% confidence ellipse for each class
+          legend = TRUE, title = 'PLSDA', rep.space ="X-variate", star=TRUE,
+          col = c("seagreen3","tomato1",  "slateblue1"), legend.position = "right",
+          style = "ggplot2", pch = c(16,16,16),size.title = 23,
+          size.legend=23, size.legend.title=23, size.xlabel=23,
+          size.ylabel=23, size.axis=23)
+
+plsda_1<-x[["df"]]
+
+plsda<-plsda_1 
+
+plsda$group<-recode(plsda$group, "Normal"="Control")
+plsda$group<-factor(plsda$group, levels=c("AAD","Control","SAD"))
+type_col=c("AAD"="tomato1","Control"="seagreen3","SAD"="slateblue1")
+
+a=ggplot(plsda, aes(x=x, y=y)) + geom_point(size=4,aes(fill=group, color=group, shape=group), alpha=0.7)+
+ scale_fill_manual(values=type_col, labels=c("AAD","Control","SAD"), "Diagnosis")+
+  guides(fill=guide_legend(ncol=1 ,override.aes = list(shape =c(21,22,23), size=4, color=c("tomato1", "seagreen3", "slateblue1"))))+
+  scale_shape_manual(values=c(21,22,23), guide=FALSE)+
+  scale_color_manual(values= c("tomato1", "seagreen3", "slateblue1"), guide=FALSE)+
+  theme_bw()+ ggtitle("sPLSDA")+
+  #xlab("XY-Variate 1")+
+  #ylab("XY-Variate 2")+
+  labs(x = paste0("Comp1", " (", round(ROSMAP.splsda[["prop_expl_var"]][["X"]][["comp1"]],4)*100,"%)"), 
+       y = paste0("Comp2", " (", round(ROSMAP.splsda[["prop_expl_var"]][["X"]][["comp2"]],4)*100,"%)"))+
+  theme(legend.key=element_blank(), 
+        axis.text.x = element_text(colour = "black", size = 16), 
+        axis.text.y = element_text(colour ="black", size = 16), 
+        legend.text = element_text(size = 18, colour ="black"), 
+        legend.title = element_text(size = 18),
+        axis.title = element_text(size=18), plot.title = element_text(size=20),
+        panel.grid.major = element_blank(), panel.grid.minor = element_blank())+
+  stat_ellipse(
+               aes(color = group), alpha = 0.7)+stat_stars(aes(color = group))
+
+a
+# use the max.dist measure to form decision boundaries between classes based on PLS-DA data
+background = background.predict(ROSMAP.splsda, comp.predicted=2, dist = "max.dist")
+
+
+b1=plotIndiv(ROSMAP.splsda, comp = 1:2,
+          group = ROSMAP$types, ind.names = FALSE, # colour points by class
+          background = background, # include prediction background for each class
+          legend = FALSE, title = "Prediction Background", 
+          pch = c(16,16,16), legend.title ="",
+          size.legend=23, size.legend.title=20, size.xlabel=23,
+          size.ylabel=23, size.axis=23, size.title = 23,
+          X.label='Comp 1: 25.1%', Y.label = 'Comp 2: 4.8%',
+          col = c("seagreen3","tomato1", "slateblue1"), style = "ggplot2")
+name=selectVar(ROSMAP.splsda, comp = 1)$name
+value=selectVar(ROSMAP.splsda, comp = 1)$value
+plotLoadings(ROSMAP.splsda, method = 'mean', contrib = 'max')  
+
+# roc
+auc.plsda <- auroc(result.plsda.ROSMAP, line.col =  c("tomato1", "seagreen3", "slateblue1"), roc.comp=2)
+
+auc_result<-auc.plsda[["graph.Comp2"]][["data"]]
+
+col.per.group = c("AAD vs Other(s): 0.688"="tomato1", "Normal vs Other(s): 0.6774"="seagreen3", "SAD vs Other(s): 0.7842"="slateblue1")
+
+b=ggplot(auc_result, aes(x=Specificity, y=Sensitivity,color=Outcome))+geom_line(size=1.5)+
+scale_color_manual(values=col.per.group, "ROC", labels=c("AAD vs Other(s): 0.688","Control vs Other(s): 0.6774", "SAD vs Other(s): 0.7842"))+theme_bw()+xlab("Specificity (%)")+ylab("Sensitivity (%)")+
+  theme(legend.text = element_text(size=18),legend.title = element_text(size=18), axis.title = element_text(size=18), axis.text = element_text(size=22),legend.position=c(0.62,0.2), panel.grid = element_blank())
+b
+#=====revision add cross validation=======
+set.seed(2543) # for reproducibility
+# undergo performance evaluation in order to tune the number of components to use
+perf.splsda.ROSMAP <- perf(ROSMAP.splsda, validation = "Mfold", 
+                           folds = 10, nrepeat = 10, # use repeated cross-validation
+                           progressBar = FALSE, auc = TRUE) # include AUC values
+
+# plot the outcome of performance evaluation across all ten components
+plot(perf.splsda.ROSMAP, col = color.mixo(5:7), sd = TRUE,
+     legend.position = "horizontal")
+
+perf.splsda.ROSMAP$choice.ncomp # what is the optimal value of components according to perf()
+
+# grid of possible keepX values that will be tested for each component
+list.keepX <- c(seq(10, 120, 10))
+
+# undergo the tuning process to determine the optimal number of variables
+tune.splsda.ROSMAP <- tune.splsda(X, Y, ncomp = 10, # calculate for first 6 components
+                                  validation = 'Mfold',
+                                  folds = 10, nrepeat = 10, # use repeated cross-validation
+                                  dist = 'max.dist', # use max.dist measure
+                                  measure = "overall", # use balanced error rate of dist measure
+                                  test.keepX = list.keepX) 
+
+plot(tune.splsda.ROSMAP, col = color.jet(10)) # plot output of variable number tuning # do not run
+
+tune.splsda.ROSMAP$choice.ncomp$ncomp # what is the optimal value of components according to tune.splsda()
+tune.splsda.ROSMAP$choice.keepX # what are the optimal values of variables according to tune.splsda()
+
+optimal.ncomp <- tune.splsda.ROSMAP$choice.ncomp$ncomp
+
+optimal.keepX <- tune.splsda.ROSMAP$choice.keepX[1:optimal.ncomp]
+
+# form final model with optimized values for component and variable count
+final.splsda <- splsda(X, Y, 
+                       ncomp = optimal.ncomp, 
+                       keepX = optimal.keepX)
+auc.plsda <- auroc(final.splsda, line.col =  c("tomato1", "seagreen3", "slateblue1"))
+
+
+x=plotIndiv(final.splsda, comp = c(1,2), # plot samples from final model
+          group = ROSMAP$types, ind.names = FALSE, # colour by class label
+          ellipse = TRUE, legend = TRUE, # include 95% confidence ellipse
+          title = ' sPLS-DA', col= c("seagreen3","tomato1", "slateblue1"),
+          pch=c(16,16,16), legend.title ="",
+          size.legend=23, size.legend.title=20, size.xlabel=23,
+          size.ylabel=23, size.axis=23, size.title = 23)
+# X.label='PC1: 21%', Y.label = 'PC2: 6%'
+
+background = background.predict(final.splsda , comp.predicted=2, dist = "max.dist")
+
+
+plotIndiv(ROSMAP.splsda, comp = 1:2,
+          group = ROSMAP$types, ind.names = FALSE, # colour points by class
+          background = background, # include prediction background for each class
+          legend = FALSE, title = "Prediction Background", 
+          pch = c(16,16,16), legend.title ="",
+          size.legend=23, size.legend.title=20, size.xlabel=23,
+          size.ylabel=23, size.axis=23, size.title = 23,
+          col= c("seagreen3","tomato1", "slateblue1"))
+
+
+plsda_1<-x[["df"]]
+
+plsda<-plsda_1 
+
+plsda$group<-recode(plsda$group, "Normal"="Control")
+plsda$group<-factor(plsda$group, levels=c("AAD","Control","SAD"))
+type_col=c("AAD"="tomato1","Control"="seagreen3","SAD"="slateblue1")
+
+c=ggplot(plsda, aes(x=x, y=y)) + geom_point(size=4,aes(fill=group, color=group, shape=group), alpha=0.7)+
+ scale_fill_manual(values=type_col, labels=c("AAD","Control","SAD"), "Diagnosis")+
+  guides(fill=guide_legend(ncol=1 ,override.aes = list(shape =c(21,22,23), size=4, color=c("tomato1", "seagreen3", "slateblue1"))))+
+  scale_shape_manual(values=c(21,22,23), guide=FALSE)+
+  scale_color_manual(values= c("tomato1", "seagreen3", "slateblue1"), guide=FALSE)+
+  theme_bw()+ ggtitle("sPLSDA")+
+  #xlab("XY-Variate 1")+
+  #ylab("XY-Variate 2")+
+  labs(x = paste0("Comp1", " (", round(final.splsda[["prop_expl_var"]][["X"]][["comp1"]],4)*100,"%)"), 
+       y = paste0("Comp2", " (", round(final.splsda[["prop_expl_var"]][["X"]][["comp2"]],4)*100,"%)"))+
+  theme(legend.key=element_blank(), 
+        axis.text.x = element_text(colour = "black", size = 16), 
+        axis.text.y = element_text(colour ="black", size = 16), 
+        legend.text = element_text(size = 18, colour ="black"), 
+        legend.title = element_text(size = 18),
+        axis.title = element_text(size=18), plot.title = element_text(size=20),
+        panel.grid.major = element_blank(), panel.grid.minor = element_blank())+
+  stat_ellipse(
+               aes(color = group), alpha = 0.7)+stat_stars(aes(color = group))
+
+c
+auc.splsda = auroc(final.splsda, roc.comp=2)
+
+auc_result<-auc.splsda[["graph.Comp2"]][["data"]]
+
+col.per.group = c("AAD vs Other(s): 0.6461"="tomato1", "Normal vs Other(s): 0.6668"="seagreen3", "SAD vs Other(s): 0.7456"="slateblue1")
+
+d=ggplot(auc_result, aes(x=Specificity, y=Sensitivity,color=Outcome))+geom_line(size=1.5)+
+scale_color_manual(values=col.per.group, "ROC", labels=c("AAD vs Others: 0.6439","Control vs Others: 0.6710", "SAD vs Others: 0.7469"))+theme_bw()+xlab("Specificity (%)")+ylab("Sensitivity (%)")+
+  theme(legend.text = element_text(size=18),legend.title = element_text(size=18), axis.title = element_text(size=18), axis.text = element_text(size=22),legend.position=c(0.62,0.2), panel.grid = element_blank())
+d
+
+ggarrange(a,b,c,d, nrow=2, ncol=2, widths=c(1.1,1))
+
+
+#=====feature selection and replot plsda Figure 3e======
+features.to.view <- 10 # how many features do you want to look at
+comp=1
+loadingsX1 = abs(final.splsda$loadings$X[, comp]) # extract the absolute loading values
+c1<-data.frame(sort(loadingsX1, decreasing = TRUE)[1:features.to.view]) # sort them and print out the desired quantity
+
+features.to.view <- 90 # how many features do you want to look at
+comp=2
+loadingsX1 = abs(final.splsda$loadings$X[, comp]) 
+c2<-data.frame(sort(loadingsX1, decreasing = TRUE)[1:features.to.view]) 
+
+selected_feature<-rbind(c1,c2)
+
+lipidomics_1<-dplyr::select(lipidomics, rownames(c1), rownames(c2))
+
+# convert to numeric matrix
+L<-as.matrix(lipidomics_1)
+L1<-matrix(as.numeric(L), nrow=nrow(L))
+
+
+X<-L
+Y<-ROSMAP$types
+dim(X) # check the dimensions of the X dataframe
+summary(Y)  # check the distribution of class labels
+
+
+
+# sPLS-DA
+ROSMAP.splsda<- mixOmics::splsda(X, Y, ncomp = 10)  # set ncomp to 10 for performance assessment later
+
+x=plotIndiv(ROSMAP.splsda, comp = 1:2, 
+          group = ROSMAP$types, ind.names = FALSE,  # colour points by class
+          ellipse = TRUE, # include 95% confidence ellipse for each class
+          legend = FALSE, title = 'PLSDA', rep.space ="X-variate", star=TRUE,
+          col= c("seagreen3","tomato1", "slateblue1"), legend.position = "right",
+          style = "ggplot2", pch = c(16,16,16),size.title = 23,
+          size.legend=23, size.legend.title=23, size.xlabel=23, layout = NULL,
+          size.ylabel=23, size.axis=23)
+
+plsda_1<-x[["df"]]
+
+plsda<-plsda_1 
+
+plsda$group<-recode(plsda$group, "Normal"="Control")
+plsda$group<-factor(plsda$group, levels=c("AAD","Control","SAD"))
+type_col=c("AAD"="tomato1","Control"="seagreen3","SAD"="slateblue1")
+
+e_left=ggplot(plsda, aes(x=x, y=y)) + geom_point(size=4,aes(fill=group, color=group, shape=group), alpha=0.7)+
+ scale_fill_manual(values=type_col, labels=c("AAD","Control","SAD"), "Diagnosis")+
+  guides(fill=guide_legend(ncol=1 ,override.aes = list(shape =c(21,21,21), size=4, color=c("tomato1", "seagreen3", "slateblue1"))))+
+  scale_shape_manual(values=c(21,21,21), guide=FALSE)+
+  scale_color_manual(values= c("tomato1", "seagreen3", "slateblue1"), guide=FALSE)+
+  theme_bw()+ ggtitle("sPLSDA")+
+  #xlab("XY-Variate 1")+
+  #ylab("XY-Variate 2")+
+  labs(x = paste0("Comp1", " (", round(ROSMAP.splsda[["prop_expl_var"]][["X"]][["comp1"]],4)*100,"%)"), 
+       y = paste0("Comp2", " (", round(ROSMAP.splsda[["prop_expl_var"]][["X"]][["comp2"]],4)*100,"%)"))+
+  theme(legend.key=element_blank(), 
+        axis.text.x = element_text(colour = "black", size = 16), 
+        axis.text.y = element_text(colour ="black", size = 16), 
+        legend.text = element_text(size = 18, colour ="black"), 
+        legend.title = element_text(size = 18),
+        axis.title = element_text(size=18), plot.title = element_text(size=20),
+        panel.grid.major = element_blank(), panel.grid.minor = element_blank(), legend.position = "none")+
+  stat_ellipse(
+               aes(color = group), alpha = 0.7)+stat_stars(aes(color = group))
+
+
+e_left
+
+
+
+# use the max.dist measure to form decision boundaries between classes based on PLS-DA data
+background = background.predict(ROSMAP.splsda, comp.predicted=2, dist = "max.dist")
+
+
+e_right=plotIndiv(ROSMAP.splsda, comp = 1:2,
+          group = ROSMAP$types, ind.names = FALSE, # colour points by class
+          background = background, # include prediction background for each class
+          legend = FALSE, title = "Prediction Background", 
+          pch = c(16,16,16), legend.title ="",
+          size.legend=20, size.legend.title=18, size.xlabel=20,
+          size.ylabel=20, size.axis=20, size.title = 20,
+         
+          col= c("seagreen3","tomato1", "slateblue1"),style = "ggplot2")
+  
+
+e_right
+
+
+# =====roc Figure 3f========
+auc.plsda <- auroc(ROSMAP.splsda, line.col =  c("tomato1", "seagreen3", "slateblue1"), roc.comp=2)
+
+
+auc_result<-auc.plsda[["graph.Comp2"]][["data"]]
+
+col.per.group = c("AAD vs Other(s): 0.6708"="tomato1", "Normal vs Other(s): 0.6591"="seagreen3", "SAD vs Other(s): 0.7584"="slateblue1")
+
+f=ggplot(auc_result, aes(x=Specificity, y=Sensitivity,color=Outcome))+geom_line(size=1.5)+
+scale_color_manual(values=col.per.group, "ROC", labels=c("AAD vs Others: 0.6708","Control vs Others: 0.6591", "SAD vs Others: 0.7584"))+theme_bw()+xlab("Specificity (%)")+ylab("Sensitivity (%)")+
+  theme(legend.text = element_text(size=18),legend.title = element_text(size=18), axis.title = element_text(size=18), axis.text = element_text(size=22),legend.position=c(0.62,0.2), panel.grid = element_blank())
+f
+# add the confidence intervals
+library(cvAUC)
+auc_pred<-auc.plsda[["graph.Comp2"]][["plot_env"]][["res.predict"]]
+
+auc_pred<-auc_pred %>% as.data.frame %>% rownames_to_column("sample") %>% left_join(data_corrected_1[,c(1:2)], by=c("sample"="NAME"))
+colnames(auc_pred)[5]<-"Class"
+
+pred_aad<-auc_pred %>% mutate(Y=ifelse(Class=="AAD","1","0")) %>% mutate(Y=as.numeric(Y))
+
+out_AAD <- iid_example(data = dplyr::select(pred_aad, AAD ,Y), V = 10)
+
+pred_sad<-auc_pred %>% mutate(Y=ifelse(Class=="SAD","1","0")) %>% mutate(Y=as.numeric(Y))
+
+out_SAD <- iid_example(data = dplyr::select(pred_sad, SAD ,Y), V = 10)
+
+
+pred_C<-auc_pred %>% mutate(Y=ifelse(Class=="Normal","1","0")) %>% mutate(Y=as.numeric(Y))
+
+out_C <- iid_example(data = dplyr::select(pred_C, Normal ,Y), V = 10)
+
+roc_group=ggplot(auc_result, aes(x=Specificity, y=Sensitivity,color=Outcome))+geom_line(size=1.5)+
+scale_color_manual(values=col.per.group, "ROC", labels=c("AAD vs Others: 0.673\n95%CI [0.604, 0.743]","Control vs Others: 0.657\n95%CI [0.595, 0.720]", "SAD vs Others: 0.761\n95%CI [0.708, 0.813]"))+theme_bw()+xlab("Specificity (%)")+ylab("Sensitivity (%)")+
+  theme(legend.text = element_text(size=15,margin = margin(t = 10)),legend.title = element_text(size=16), axis.title = element_text(size=20), axis.text = element_text(size=18),legend.position=c(0.64,0.22), panel.grid = element_blank(), legend.spacing.y = unit(1, 'cm'))+
+  guides(color = guide_legend(byrow = TRUE))
+
+
+roc_group  # Figure 3f
+
+#====2nd revision_ROC range figure 3f=====
+# Create CV folds (stratify by outcome)
+.cvFolds <- function(Y, V){
+Y0 <- split(sample(which(Y == 0)),
+rep(1:V, length = length(which(Y == 0))))
+Y1 <- split(sample(which(Y == 1)),
+rep(1:V, length = length(which(Y == 1))))
+folds <- vector("list", length = V)
+for (v in seq(V)) {folds[[v]] <- c(Y0[[v]], Y1[[v]])}
+return(folds)
+}
+# Train/test glm for each fold
+.doFit <- function(v, folds, data){
+fit <- glm(Y~., data = data[-folds[[v]],], family = binomial)
+pred <- predict(fit, newdata = data[folds[[v]],], type = "response")
+return(pred)
+}
+iid_example <- function(data, V = 10){
+# Create folds
+folds <- .cvFolds(Y = data$Y, V = V)
+# CV train/predict
+predictions <- unlist(sapply(seq(V), .doFit,
+folds = folds, data = data))
+# Re-order pred values
+predictions[unlist(folds)] <- predictions
+# Get CV AUC and confidence interval
+out <- ci.cvAUC(predictions = predictions, labels = data$Y,
+folds = folds, confidence = 0.95)
+return(out)
+}
+
+library(cvAUC)
+# the data metabolite on the column name and sample on the rownames and include Y as response
+
+# loading the data 
+
+lipidomics_aad<-lipidomics_1 %>% mutate(Y=ROSMAP$types) %>% mutate(Y=ifelse(Y=="AAD","1","0"))
+lipidomics_aad$Y<-as.numeric(lipidomics_aad$Y)
+
+lipidomics_sad<-lipidomics_1 %>% mutate(Y=ROSMAP$types) %>% mutate(Y=ifelse(Y=="SAD","1","0"))
+lipidomics_sad$Y<-as.numeric(lipidomics_sad$Y)
+
+lipidomics_c<-lipidomics_1 %>% mutate(Y=ROSMAP$types) %>% mutate(Y=ifelse(Y=="Normal","1","0"))
+lipidomics_c$Y<-as.numeric(lipidomics_c$Y)
+
+set.seed(1)
+out_AAD <- iid_example(data = lipidomics_aad, V = 10)
+out_SAD <- iid_example(data = lipidomics_sad, V = 10)
+out_C <- iid_example(data = lipidomics_c, V = 10)
+
+# use prism for calculating the ci
+ggplot(auc_result, aes(x=Specificity, y=Sensitivity,color=Outcome))+geom_line(size=1.5)+
+scale_color_manual(values=col.per.group, "ROC", labels=c("AAD vs Others: 0.5477\n[0.493,0.680]","Control vs Others: 0.8057\n[0.482,0.645]", "SAD vs Others: 0.817\n[0.734,0.812]"))+theme_bw()+xlab("Specificity (%)")+ylab("Sensitivity (%)")+
+  theme(legend.text = element_text(size=18),legend.title = element_text(size=18), axis.title = element_text(size=18), axis.text = element_text(size=22),legend.position=c(0.62,0.2), panel.grid = element_blank())
+
+#====Figure 8a====
+pl_res<-plotLoadings(ROSMAP.splsda, contrib = 'max', method = 'mean', 
+                     size.name= 0.7, comp = 1, ndisplay = 20, legend.color= c("tomato1", "seagreen3", "slateblue1"),
+                     size.legend = 1, max.name.length =  50, title="Contribution on PC1", block = 1)
+
+data_pc<- pl_res[["1"]] %>% rownames_to_column("metabolite")
+data_pc$GroupContrib<-recode(data_pc$GroupContrib, "Normal"="Control")
+data_pc$GroupContrib<-factor(data_pc$GroupContrib, levels=c("Control","AAD","SAD"))
+
+type_col=c("AAD"="tomato1","Control"="seagreen3","SAD"="slateblue1")
+
+c1=ggplot(data_pc, aes(x=reorder(metabolite,abs(importance)),y=importance, fill=GroupContrib))+
+   geom_bar(stat = "identity")+ylab("Importance")+xlab("")+ggtitle("Contribution to Component 1")+
+  scale_fill_manual(values=type_col,"Outcome")+coord_flip()+theme_bw()+
+  theme(legend.text = element_text(size=20),legend.title = element_text(size=20), axis.title = element_text(size=20), axis.text = element_text(size=20), panel.grid = element_blank(), plot.title=element_text(size=22))
+
+
+
+pl_res<-plotLoadings(ROSMAP.splsda, contrib = 'max', method = 'mean', 
+                     size.name= 0.7, comp = 2, ndisplay = 20, legend.color= c("tomato1", "seagreen3", "slateblue1"),
+                     size.legend = 1, max.name.length =  50, title="Contribution on PC2", block = 1)
+
+
+data_pc<-pl_res[["1"]] %>% rownames_to_column("metabolite")
+data_pc$GroupContrib<-recode(data_pc$GroupContrib, "Normal"="Control")
+data_pc$GroupContrib<-factor(data_pc$GroupContrib, levels=c("Control","AAD","SAD"))
+
+type_col=c("AAD"="tomato1","Control"="seagreen3","SAD"="slateblue1")
+
+c2=ggplot(data_pc, aes(x=reorder(metabolite,importance),y=importance, fill=GroupContrib))+
+   geom_bar(stat = "identity")+ylab("Importance")+xlab("")+ggtitle("Contribution to Component 2")+
+  scale_fill_manual(values=type_col,"Outcome")+coord_flip()+theme_bw()+
+  theme(legend.text = element_text(size=20),legend.title = element_text(size=20), axis.title = element_text(size=20), axis.text = element_text(size=20), panel.grid = element_blank(), plot.title=element_text(size=22))
+
+#ggarrange(a,b,e,f, nrow=2, ncol=2, widths=c(1.2,1))
+#Figure 8a
+ggarrange(c1,NULL,c2,common.legend = TRUE, legend="right", widths=c(2,0.5,2),ncol=3)
+
+
+#=====REVISION Figure S8b=========
+features.to.view <- 30 # how many features do you want to look at
+comp=1
+loadingsX1 = abs(final.splsda$loadings$X[, comp]) # extract the absolute loading values
+c1<-data.frame(sort(loadingsX1, decreasing = TRUE)[1:features.to.view]) # sort them and print out the desired quantity
+
+lipidomics_1<-dplyr::select(lipidomics, rownames(c1))
+data<-cbind(ROSMAP$types, lipidomics_1) # AAD  Normal SAD
+colnames(data)[1]<-"Class"
+
+data_c_sad<-data %>% data.frame %>% filter(!Class=="AAD") %>% mutate(y=ifelse(Class=="Normal",0,1)) %>% relocate(y,.after=Class) %>% dplyr::select(-Class)
+
+data_c_aad<-data %>% data.frame %>% filter(!Class=="SAD") %>% mutate(y=ifelse(Class=="Normal",0,1)) %>% relocate(y,.after=Class) %>% dplyr::select(-Class)
+
+data_sad_aad<-data %>% data.frame %>% filter(!Class=="Normal") %>% mutate(y=ifelse(Class=="AAD",0,1)) %>% relocate(y,.after=Class) %>% dplyr::select(-Class)
+
+data_c_sad$y<-factor(data_c_sad$y)
+data_c_aad$y<-factor(data_c_aad$y)
+data_sad_aad$y<-factor(data_sad_aad$y)
+
+
+sad<-glm(y~., data=data_c_sad, family=binomial())
+
+aad<-glm(y~., data=data_c_aad, family=binomial())
+noc<-glm(y~., data=data_sad_aad, family=binomial())
+
+library(pROC)
+sad_roc <- roc(data_c_sad$y,predict(sad, data_c_sad, type = "response")) 
+ci_sad <- ci.auc(sad_roc, conf.level = 0.95)
+ci_sad<-as.data.frame(ci_sad)
+sad_p<-plot(sad_roc)
+
+aad_roc <- roc(data_c_aad$y,predict(aad, data_c_aad, type = "response")) 
+ci_aad <- ci.auc(aad_roc, conf.level = 0.95)
+ci_aad<-as.data.frame(ci_aad)
+aad_p<-plot(aad_roc)
+
+noc <- roc(data_sad_aad$y,predict(noc, data_sad_aad, type = "response")) 
+ci <- ci.auc(roc, conf.level = 0.95)
+ci<-as.data.frame(ci)
+noc_p<-plot(roc)
+
+auc_result_1<-data.frame(y=sad_p$sensitivities,x=sad_p$specificities, type="SAD vs Con")
+a=wilcox.test(auc_result_1$y,auc_result_1$x, alternative = "less")
+a
+auc_result_2<-data.frame(y=aad_p$sensitivities,x=aad_p$specificities, type="AAD vs Con")
+b=wilcox.test(auc_result_2$y,auc_result_2$x, alternative = "less")
+b
+auc_result_3<-data.frame(y=noc_p$sensitivities,x=noc_p$specificities, type="AAD vs SAD")
+c=wilcox.test(auc_result_3$y,auc_result_3$x, alternative = "less")
+c
+auc_result<-rbind(auc_result_1, auc_result_2, auc_result_3)
+
+
+a_roc=ggplot(filter(auc_result,type=="SAD vs Con"), aes(x=100-100*x, y=y*100))+geom_line(size=2, color="blue")+
+  theme_bw()+
+  xlab("1-Specificity (%)")+
+  ylab("Sensitivity (%)")+ggtitle("SAD vs Control")+
+theme(legend.text = element_text(size=19),legend.title = element_text(size=20), axis.title = element_text(size=20), axis.text = element_text(size=18),legend.position=c(0.62,0.2), plot.title = element_text(size=20,hjust=0.5), panel.grid = element_blank())+
+  geom_text(x=70,y=30,label=paste0("     AUC=",round(sad_roc[["auc"]],3),"\n        [",round(ci_sad[1,1],3),", ",round(ci_sad[3,1],3),"]","\nP=",round(a[["p.value"]],3)), check_overlap = T, size=7)+ 
+  geom_abline(intercept = 1, slope = 1, color="red",size = 0.5,linetype = "dashed") 
+a_roc
+b_roc=ggplot(filter(auc_result,type=="AAD vs Con"), aes(x=100-100*x, y=y*100))+geom_line(size=2, color="blue")+
+  theme_bw()+xlab("1-Specificity (%)")+ylab("Sensitivity (%)")+ggtitle("AAD vs Control")+
+    theme(legend.text = element_text(size=19),legend.title = element_text(size=20), axis.title = element_text(size=20), axis.text = element_text(size=18),legend.position=c(0.62,0.2), plot.title = element_text(size=20,hjust=0.5), panel.grid = element_blank())+geom_text(x=70,y=30,label=paste0("     AUC=",round(aad_roc[["auc"]],3),"\n        [",round(ci_aad[1,1],3),", ",round(ci_aad[3,1],3),"]","\nP=",round(b[["p.value"]],3)), check_overlap = T, size=7)+  geom_abline(intercept = 1, slope = 1, color="red",size = 0.5,linetype = "dashed") 
+b_roc
+c_roc=ggplot(filter(auc_result,type=="AAD vs SAD"), aes(x=100-100*x, y=y*100))+geom_line(size=2, color="blue")+
+  theme_bw()+xlab("1-Specificity (%)")+ylab("Sensitivity (%)")+ggtitle("SAD vs AAD")+
+    theme(legend.text = element_text(size=19),legend.title = element_text(size=20), axis.title = element_text(size=20), axis.text = element_text(size=18),legend.position=c(0.62,0.2), plot.title = element_text(size=20, hjust=0.5), panel.grid = element_blank())+geom_text(x=70,y=30,label=paste0("     AUC=",round(noc[["auc"]],3),"\n        [",round(ci[1,1],3),", ",round(ci[3,1],3),"]","\nP=",round(c[["p.value"]],3)), check_overlap = T, size=7)+  geom_abline(intercept = 1, slope = 1, color="red",size = 0.5,linetype = "dashed") 
+c_roc
+
+
+ggarrange(a_roc, b_roc,c_roc, nrow=1)
+
+
+#====REVISION Figure S8C=====
+lipidomics_2<-dplyr::select(lipidomics, "LPE(22:6)")
+data<-cbind(ROSMAP$types, lipidomics_2) # AAD  Normal SAD
+colnames(data)[1]<-"Class"
+
+data_c_sad<-data %>% data.frame %>% filter(!Class=="AAD") %>% mutate(y=ifelse(Class=="Normal",0,1)) %>% relocate(y,.after=Class) %>% dplyr::select(-Class)
+
+data_c_aad<-data %>% data.frame %>% filter(!Class=="SAD") %>% mutate(y=ifelse(Class=="Normal",0,1)) %>% relocate(y,.after=Class) %>% dplyr::select(-Class)
+
+data_sad_aad<-data %>% data.frame %>% filter(!Class=="Normal") %>% mutate(y=ifelse(Class=="AAD",0,1)) %>% relocate(y,.after=Class) %>% dplyr::select(-Class)
+
+data_c_sad$y<-factor(data_c_sad$y)
+data_c_aad$y<-factor(data_c_aad$y)
+data_sad_aad$y<-factor(data_sad_aad$y)
+
+
+sad<-glm(y~., data=data_c_sad, family=binomial())
+aad<-glm(y~., data=data_c_aad, family=binomial())
+noc<-glm(y~., data=data_sad_aad, family=binomial())
+
+library(pROC)
+library(verification)
+sad_roc <- roc(data_c_sad$y,predict(sad, data_c_sad, type = "response")) 
+ci_sad <- ci.auc(sad_roc, conf.level = 0.95)
+ci_sad<-as.data.frame(ci_sad)
+sad_p<-plot(sad_roc)
+sad=data.frame(obs=sad_p$response,pre=sad_p$predictor)
+sad$obs<-as.numeric(sad$obs)
+sad$obs<-recode(sad$obs,"2"="1","1"="0")
+sad$obs<-as.numeric(sad$obs)
+sad=roc.area(sad$obs,sad$pre)
+sad
+aad_roc <- roc(data_c_aad$y,predict(aad, data_c_aad, type = "response")) 
+ci_aad <- ci.auc(aad_roc, conf.level = 0.95)
+ci_aad<-as.data.frame(ci_aad)
+aad_p<-plot(aad_roc)
+aad=data.frame(obs=aad_p$response,pre=aad_p$predictor)
+aad$obs<-as.numeric(aad$obs)
+aad$obs<-recode(aad$obs,"2"="1","1"="0")
+aad$obs<-as.numeric(aad$obs)
+aad=roc.area(aad$obs,aad$pre)
+aad
+noc <- roc(data_sad_aad$y,predict(noc, data_sad_aad, type = "response")) 
+ci <- ci.auc(noc, conf.level = 0.95)
+ci<-as.data.frame(ci)
+noc_p<-plot(noc)
+noc=data.frame(obs=noc_p$response,pre=noc_p$predictor)
+noc$obs<-as.numeric(noc$obs)
+noc$obs<-recode(noc$obs,"2"="1","1"="0")
+noc$obs<-as.numeric(noc$obs)
+noc=roc.area(noc$obs,noc$pre)
+noc
+
+auc_result_1<-data.frame(y=sad_p$sensitivities,x=sad_p$specificities, type="SAD vs Con")
+auc_result_2<-data.frame(y=aad_p$sensitivities,x=aad_p$specificities, type="AAD vs Con")
+auc_result_3<-data.frame(y=noc_p$sensitivities,x=noc_p$specificities, type="AAD vs SAD")
+
+auc_result<-rbind(auc_result_1, auc_result_2, auc_result_3)
+
+#png("roc.png", width=15,height=15, units="cm", res=300)
+label=paste0("     AUC=",round(sad$A,3),"\n        [",round(ci_sad[1,1],3),", ",round(ci_sad[3,1],3),"]","\nP=",round(sad$p.value,3))
+
+
+
+a_roc=ggplot(filter(auc_result,type=="SAD vs Con"), aes(x=100-100*x, y=y*100))+geom_line(size=2, color="blue")+
+  theme_bw()+xlab("1-Specificity (%)")+ylab("Sensitivity (%)")+ggtitle("LPE(22:6)\nSAD vs Control")+
+   theme(legend.text = element_text(size=19),legend.title = element_text(size=20), axis.title = element_text(size=20), axis.text = element_text(size=18),legend.position=c(0.62,0.2), plot.title = element_text(size=20,hjust=0.5), panel.grid = element_blank())+geom_text(x=70,y=30,label=paste0("     AUC=",round(sad$A,3),"\n        [",round(ci_sad[1,1],3),", ",round(ci_sad[3,1],3),"]","\nP=",round(sad$p.value,5)), check_overlap = T, size=7)+ geom_abline(intercept = 1, slope = 1, color="red",size = 0.5,linetype = "dashed") 
+
+b_roc=ggplot(filter(auc_result,type=="AAD vs Con"), aes(x=100-100*x, y=y*100))+geom_line(size=2, color="blue")+
+  theme_bw()+xlab("1-Specificity (%)")+ylab("Sensitivity (%)")+ggtitle("LPE(22:6)\nAAD vs Control")+
+    theme(legend.text = element_text(size=19),legend.title = element_text(size=20), axis.title = element_text(size=20), axis.text = element_text(size=18),legend.position=c(0.62,0.2), plot.title = element_text(size=20,hjust=0.5), panel.grid = element_blank())+geom_text(x=70,y=30,label=paste0("     AUC=",round(aad$A,3),"\n      [",round(ci_aad[1,1],3),", ",round(ci_aad[3,1],3),"]","\nP=",round(aad$p.value,3)), check_overlap = T, size=7)+ geom_abline(intercept = 1, slope = 1, color="red",size = 0.5,linetype = "dashed") 
+
+c_roc=ggplot(filter(auc_result,type=="AAD vs SAD"), aes(x=100-100*x, y=y*100))+geom_line(size=2, color="blue")+
+  theme_bw()+xlab("1-Specificity (%)")+ylab("Sensitivity (%)")+ggtitle("LPE(22:6)\nSAD vs AAD")+
+    theme(legend.text = element_text(size=19),legend.title = element_text(size=20), axis.title = element_text(size=20), axis.text = element_text(size=18),legend.position=c(0.62,0.2), plot.title = element_text(size=20, hjust=0.5), panel.grid = element_blank())+geom_text(x=70,y=30,label=paste0("     AUC=",round(noc$A,3),"\n        [",round(ci[1,1],3),", ",round(ci[3,1],3),"]","\nP=",round(noc$p.value,3)), check_overlap = T, size=7)+ geom_abline(intercept = 1, slope = 1, color="red",size = 0.5,linetype = "dashed") 
+
+
+ggarrange(a_roc, b_roc,c_roc, nrow=1)
+
+
+```
+#Figure S6
+```{r}
+
+#use mean_results
+mat2<-read.csv(file = "C:/cyc/ROSMAP publication/manuscript/ROSMAP/figures_R/ROSMAP/mat2_1.csv", sep = ",", header = TRUE, row.names = 1)
+mat3<-read.csv(file = "C:/cyc/ROSMAP publication/manuscript/ROSMAP/figures_R/ROSMAP/mat2_2.csv", sep = ",", header = TRUE, row.names = 1)
+
+mean_results[,-1]<-lapply(mean_results[,-1], as.numeric)
+mat2<-mean_results %>% column_to_rownames("lipids") %>% dplyr::select(Normal)
+mat3<-mean_results %>% column_to_rownames("lipids") %>% mutate(lipid_class=data_corrected_t$lipid_class) %>% dplyr::select(lipid_class, Normal, AAD,SAD)
+
+col_fun1 = colorRamp2(c(-0.3, 0, 0.3), c("royalblue1", "white", "tomato1"))
+mat2<-data.matrix(mat2)
+split<-c(rep("AcCa",2), 
+                             rep("Cer", 39),
+                             rep("ChE", 2),
+                             rep("GSL", 29),
+                             rep("LPC",7),
+                             rep("PC", 71),
+                             rep("LPE", 10),
+                             rep("PE", 66),
+                             rep("PG", 6),
+                             rep("PI", 14),
+                             rep("PS", 23),
+                             rep("SM", 12),
+                             rep("DAG", 8),
+                             rep("TAG", 52),
+                             rep("MAG", 2))
+
+split=factor(split, levels=c("AcCa",
+                             "Cer", 
+                             "ChE",
+                             "GSL", 
+                             "LPC",
+                             "PC", 
+                             "LPE",
+                             "PE", 
+                             "PG", 
+                             "PI", 
+                             "PS",
+                             "SM",
+                             "DAG",
+                             "TAG","MAG"))
+
+
+circos.par(start.degree = 90, gap.after = c(2, 2, 2, 2,2,2,2,2,2,2,2,2,2,2, 15))
+
+circos.heatmap(mat2, col = col_fun1, rownames.side = "outside", rownames.cex = 0.4, split=split,
+               bg.border="black", track.height = 0.1, cell.border = "grey")
+circos.heatmap(mat3[,3], col = col_fun1, bg.border="black", track.height = 0.1, cell.border = "grey")
+circos.heatmap(mat3[,4], col = col_fun1, bg.border="black", track.height = 0.1, cell.border = "grey", 
+               dend.side = "inside")
+
+lgd = Legend(title = "Average abundace", col_fun = col_fun1, grid_width = unit(6, "mm"), title_position="topcenter")
+grid.draw(lgd)
+
+# Add labeing back to the figure
+circos.track(track.index = 1, panel.fun = function(x, y) {
+  circos.text(CELL_META$xcenter, CELL_META$ylim[2], CELL_META$sector.index, 
+              facing = "bending.inside", niceFacing = TRUE, adj = c(0.5, -1),cex=1)
+}, bg.border =NA)
+
+
+# label"Normal"
+circos.text(track.index = 1,get.cell.meta.data("cell.xlim")-mean(get.cell.meta.data("cell.xlim"))/2,
+            get.cell.meta.data("cell.ylim")-max(get.cell.meta.data("cell.ylim"))/2, labels = "Control",facing = "bending.inside", 
+            niceFacing = TRUE, adj = c(-0.3,0),cex = 0.9)
+# label"AAD"
+circos.text(track.index = 2,get.cell.meta.data("cell.xlim")-mean(get.cell.meta.data("cell.xlim"))/2,
+            get.cell.meta.data("cell.ylim")-2*max(get.cell.meta.data("cell.ylim")), labels = "AAD",facing = "bending.inside", 
+            niceFacing = TRUE, adj = c(-0.3,-3),cex=0.9)
+# label"SAD"
+circos.text(track.index = 2,get.cell.meta.data("cell.xlim")-mean(get.cell.meta.data("cell.xlim"))/2,
+            get.cell.meta.data("cell.ylim")-2*max(get.cell.meta.data("cell.ylim")), labels = "SAD",facing = "bending.inside", 
+            niceFacing = TRUE, adj = c(-0.3,0),cex=0.9)
+
+#circos.clear()
+```
+# WGCNA on covariate adjusted data
+```{r}
+#====data input=====
+# The following setting is important, do not omit.
+options(stringsAsFactors = FALSE);
+
+# Read in lipidomic data set
+# remove b25_129C because this sample lacks of clinical information
+wgcna_df<-data_corrected_1 %>% 
+  filter(!NAME=="b25.129C_R2171619") %>%
+  dplyr::select(-(`CLASS:Condition`:bmi)) %>% 
+  t() %>% 
+  data.frame %>% 
+  row_to_names(row_number = 1) %>%
+  lapply(as.numeric) %>%
+  data.frame
+
+rownames(wgcna_df)<-names(data_corrected) # add lipid name
+
+dim(wgcna_df)
+names(wgcna_df)
+datExpr0 = as.data.frame(t(wgcna_df))
+names(datExpr0) = rownames(wgcna_df)
+rownames(datExpr0) = names(wgcna_df)
+gsg = goodSamplesGenes(datExpr0, verbose = 3);
+gsg$allOK
+sampleTree = hclust(dist(datExpr0), method = "average");
+sizeGrWindow(12,9)
+
+par(cex = 0.6);
+par(mar = c(0,4,2,0))
+plot(sampleTree, main = "Sample clustering to detect outliers", sub="", xlab="", cex.lab = 1.5,
+     cex.axis = 1.5, cex.main = 2)
+# Plot a line to show the cut
+abline(h = 27, col = "red");
+# Determine cluster under the line
+clust = cutreeStatic(sampleTree, cutHeight = 27, minSize = 50)
+table(clust)
+# clust 1 contains the samples we want to keep.
+# sample, b47.127N_R6112514 was removed due to a potential outlier
+keepSamples = (clust==1)
+datExpr = datExpr0[keepSamples, ]
+dim(datExpr)
+nGenes = ncol(datExpr)
+nSamples = nrow(datExpr)
+
+#loading trait data (sample listed in the first column)
+traitData <- data_corrected_1 %>% 
+  filter(! NAME %in% c("b25.129C_R2171619","b47.127N_R6112514")) %>%
+  dplyr::select(NAME,Diagnosis,GlobalCogFunc,Reagan,Braak,CERAD,gpath,amyloid,tangles)
+
+dim(traitData)
+colnames(traitData)[8:9]<-c("Amyloid","Tangles")
+names(traitData)
+
+# Rename and convert Diagnosis to number
+traitData$Diagnosis<-recode(traitData$Diagnosis, "Asymptomatic AD"="1", "Normal"="0", "Symptomatic AD"="2")
+traitData$Diagnosis<-as.numeric(traitData$Diagnosis)
+
+# remove columns that hold information we do not need.
+allTraits = traitData
+dim(allTraits)
+names(allTraits)
+
+# Form a data frame analogous to expression data that will hold the clinical traits.
+Samples_name = rownames(datExpr);
+traitRows = match(Samples_name, allTraits$NAME);
+datTraits = allTraits[traitRows,-1]; # remove NAME 
+rownames(datTraits) = allTraits[traitRows, 1];
+collectGarbage();
+# Re-cluster samples
+sampleTree2 = hclust(dist(datExpr), method = "average")
+# Convert traits to a color representation: white means low, red means high, grey means missing entry
+traitColors = numbers2colors(datTraits, signed = FALSE);
+# Plot the sample dendrogram and the colors underneath.
+plotDendroAndColors(sampleTree2, traitColors,
+                    groupLabels = names(datTraits),
+                    main = "Sample dendrogram and trait heatmap")
+#save(datExpr, datTraits, file = "lipidomic_04152025_dataInput.RData")
+
+
+#=====network construction and module detection====
+options(stringsAsFactors = FALSE);
+enableWGCNAThreads()
+# Load the data saved in the first part
+lnames = load(file = "lipidomic_04152025_dataInput.RData");
+# Choose a set of soft-thresholding powers
+powers = c(c(1:10), seq(from = 12, to=20, by=2))
+# Call the network topology analysis function
+sft = pickSoftThreshold(datExpr, powerVector = powers, verbose = 5)
+
+sft_table <- data.frame(sft[["fitIndices"]])
+
+# Create a kable table
+library(kableExtra)
+library(webshot)
+
+ 
+  kbl(sft_table,caption = "Soft Thresholding Power Analysis") %>%
+  #kable_material(c("striped", "hover"))
+  kable_styling(bootstrap_options = c("striped", "hover")) %>%
+  save_kable("soft power table.html")
+  webshot("soft power table.html", "soft power table.png")
+
+# Plot the results:
+sizeGrWindow(9, 5)
+par(mfrow = c(1,2));
+cex1 = 0.9;
+# Scale-free topology fit index as a function of the soft-thresholding power
+plot(sft$fitIndices[,1], -sign(sft$fitIndices[,3])*sft$fitIndices[,2],
+     xlab="Soft Threshold (power)",ylab="Scale Free Topology Model Fit,signed R^2",type="n",
+     main = paste("Scale independence"));
+text(sft$fitIndices[,1], -sign(sft$fitIndices[,3])*sft$fitIndices[,2],
+     labels=powers,cex=cex1,col="red");
+# this line corresponds to using an R^2 cut-off of h
+abline(h=0.90,col="red")
+# Mean connectivity as a function of the soft-thresholding power
+plot(sft$fitIndices[,1], sft$fitIndices[,5],
+     xlab="Soft Threshold (power)",ylab="Mean Connectivity", type="n",
+     main = paste("Mean connectivity"))
+text(sft$fitIndices[,1], sft$fitIndices[,5], labels=powers, cex=cex1,col="red")
+
+# Soft threshold power (highest R square)
+softPower = 7;
+adjacency = adjacency(datExpr, power = softPower);
+
+# Turn adjacency into topological overlap
+TOM = TOMsimilarity(adjacency, TOMType = "signed", TOMDenom = "mean");
+dissTOM = 1-TOM
+
+# Call the hierarchical clustering function
+geneTree = hclust(as.dist(dissTOM), method = "average");
+# Plot the resulting clustering tree (dendrogram)
+sizeGrWindow(12,9)
+plot(geneTree, xlab="", sub="", main = "Gene clustering on TOM-based dissimilarity",
+     labels = FALSE, hang = 0.04);
+
+minModuleSize = 3;
+# Module identification using dynamic tree cut:
+dynamicMods = cutreeDynamic(dendro = geneTree, distM = dissTOM,
+                            deepSplit =4 , pamRespectsDendro = TRUE,
+                            minClusterSize = minModuleSize, method="hybrid",cutHeight=0.99
+                            );
+table(dynamicMods)
+# Convert numeric lables into colors
+library(ggsci)
+dynamicColors = labels2colors(dynamicMods,
+                              colorSeq = c("#1f77b4","#ff7f0e","gold","black","#2ca02c","#d62728","#9467bd","#bcbd22","#e377c2","#8c564b", "#C49A00","#F1C7AF","#0000FF","#06A4FF")) 
+
+table(dynamicColors)
+# Plot the dendrogram and colors underneath
+sizeGrWindow(8,6)
+plotDendroAndColors(geneTree, dynamicColors, "Dynamic Tree Cut",
+                    dendroLabels = FALSE, hang = 0.03,
+                    addGuide = TRUE, guideHang = 0.05,
+                    main = "Gene dendrogram and module colors")
+
+# Calculate eigengenes
+MEList = moduleEigengenes(datExpr, colors = dynamicColors)
+
+MEs = MEList$eigengenes
+# Calculate dissimilarity of module eigengenes
+MEDiss = 1-cor(MEs);
+# Cluster module eigengenes
+METree = hclust(as.dist(MEDiss), method = "average");
+# Plot the result
+sizeGrWindow(7, 6)
+plot(METree, main = "Clustering of module eigengenes",
+     xlab = "", sub = "")
+
+MEDissThres = 0
+# Plot the cut line into the dendrogram
+abline(h=MEDissThres, col = "red")
+# Call an automatic merging function
+merge = mergeCloseModules(datExpr, dynamicColors, cutHeight = MEDissThres, verbose = 3)
+# The merged module colors
+mergedColors = merge$colors;
+# Eigengenes of the new merged modules:
+mergedMEs = merge$newMEs;
+
+sizeGrWindow(12, 9)
+#pdf(file = "Plots/geneDendro-3.pdf", wi = 9, he = 6)
+plotDendroAndColors(geneTree, cbind(dynamicColors, mergedColors),
+                    c("Dynamic Tree Cut", "Merged dynamic"),
+                    dendroLabels = FALSE, hang = 0.03,
+                    addGuide = TRUE, guideHang = 0.05)
+
+# Rename to moduleColors
+moduleColors = mergedColors
+# Construct numerical labels corresponding to the colors
+colorOrder = c("grey", "#1f77b4","#ff7f0e","gold","black","#2ca02c","#d62728","#9467bd","#bcbd22","#e377c2","#8c564b", "#C49A00","#F1C7AF","#0000FF","#06A4FF")
+moduleLabels = match(moduleColors, colorOrder)-1;
+
+MEs = mergedMEs;
+
+# Save module colors and labels for use in subsequent parts
+#save(MEs, moduleLabels, moduleColors, geneTree, file = "lipidomic_04152025_module.RData")
+
+##  lipidomics vs clinical
+
+#=======loading lipidomic file========
+# Load the expression and trait data saved in the first part
+lnames = load(file = "lipidomic_04152025_dataInput.RData");
+
+#The variable lnames contains the names of loaded variables.
+lnames
+# Load network data saved in the second part.
+lnames = load(file = "lipidomic_04152025_module.RData");
+lnames
+nGenes = ncol(datExpr);
+nSamples = nrow(datExpr);
+# Recalculate MEs with color labels
+MEs0 = moduleEigengenes(datExpr, moduleColors)$eigengenes
+MEs = orderMEs(MEs0)
+moduleTraitCor = cor(MEs, datTraits, use = "p");
+moduleTraitPvalue = corPvalueStudent(moduleTraitCor, nSamples)
+
+sizeGrWindow(10,6)
+# Will display correlations and their p-values
+textMatrix = paste(signif(moduleTraitCor, 2), "\n(",
+                   signif(moduleTraitPvalue, 1), ")", sep = "");
+dim(textMatrix) = dim(moduleTraitCor)
+par(mar = c(5, 8.5, 3, 3));
+# Display the correlation values within a heatmap plot
+labeledHeatmap(Matrix = moduleTraitCor,
+               xLabels = names(datTraits),
+               yLabels = names(MEs),
+               ySymbols = names(MEs),
+               colorLabels = FALSE,
+               colors = blueWhiteRed(50),
+               textMatrix = textMatrix,
+               setStdMargins = FALSE,
+               cex.text = 0.5,
+               zlim = c(-1,1),
+               main = paste("Lipidomic Module-trait relationships"))
+
+# ======save correlation and p value (export data) ======
+
+cor<- data.frame(moduleTraitCor, moduleTraitPvalue)
+write.csv(cor, file ="lipid_module_clinical_mm and p_04152025.csv")
+write.csv(MEs0, file="MEs_lipidomics_04152025.csv")
+# Define variable Diagnosis containing the weight column of datTrait
+Diagnosis = as.data.frame(datTraits$Diagnosis);
+names(Diagnosis) = "Diagnosis"
+# names (colors) of the modules
+modNames = substring(names(MEs), 3)
+geneModuleMembership = as.data.frame(cor(datExpr, MEs, use = "p"));
+MMPvalue = as.data.frame(corPvalueStudent(as.matrix(geneModuleMembership), nSamples))
+names(geneModuleMembership) = paste("MM", modNames, sep="");
+names(MMPvalue) = paste("p.MM", modNames, sep="");
+geneTraitSignificance = as.data.frame(cor(datExpr, Diagnosis, use = "p"));
+GSPvalue = as.data.frame(corPvalueStudent(as.matrix(geneTraitSignificance), nSamples));
+names(geneTraitSignificance) = paste("GS.", names(Diagnosis), sep="");
+names(GSPvalue) = paste("p.GS.", names(Diagnosis), sep="")
+module = "lightyellow"
+column = match(module, modNames);
+moduleGenes = moduleColors==module;
+
+annot = data_corrected_t_2[,c(1:11)]
+dim(annot)
+names(annot)
+probes = names(datExpr)
+probes2annot = match(probes, annot$NAME)
+# The following is the number or probes without annotation:
+sum(is.na(probes2annot))
+# Should return 0.
+
+# Create the starting data frame
+geneInfo0 = data.frame(metabolite_name = probes,
+                       
+                       moduleColor = moduleColors,
+                       geneTraitSignificance,
+                       GSPvalue)
+# Order modules by their significance for weight
+modOrder = order(-abs(cor(MEs, Diagnosis, use = "p")));
+# Add module membership information in the chosen order
+for (mod in 1:ncol(geneModuleMembership))
+{
+  oldNames = names(geneInfo0)
+  geneInfo0 = data.frame(geneInfo0, geneModuleMembership[, modOrder[mod]],
+                         MMPvalue[, modOrder[mod]]);
+  names(geneInfo0) = c(oldNames, paste("MM.", modNames[modOrder[mod]], sep=""),
+                       paste("p.MM.", modNames[modOrder[mod]], sep=""))
+}
+# Order the genes in the geneInfo variable first by module color, then by geneTraitSignificance
+geneOrder = order(geneInfo0$moduleColor, -abs(geneInfo0$GS.Diagnosis));
+geneInfo = geneInfo0[geneOrder, ]
+
+#write.csv(geneInfo, file = "lipidomic_module_04152025_all_WGCNA.csv")
+```
+# wgcna results
+```{r}
+# loading all the data
+wgcna<-read.csv("C:/cyc/ROSMAP publication/manuscript/ROSMAP/figures_R/ROSMAP/lipidomic_module_04152025_all_WGCNA.csv", header=FALSE)
+wgcna<-wgcna[,-1] %>% row_to_names(row_number = 1)%>% mutate(lipid_class=gsub("\\(.*", "", metabolite_name)) %>% relocate(lipid_class, .after=metabolite_name)
+
+wgcna$lipid_class<-dplyr::recode(wgcna$lipid_class,"Hex1Cer"="HexCer", "1_Hex1Cer"="HexCer", "2_Hex1Cer"="HexCer")
+
+#number of lipids (mm>0.6) in each module
+df.mm<-wgcna %>% dplyr::select(lipid_class, metabolite_name, moduleColor, contains("MM.") )
+df.name<-df.mm[, -c(1:3)]
+mm<-df.name[ , c(TRUE,FALSE) ] # odd columns  
+mm.name<-names(mm)
+p.value<-df.name[ , !c(TRUE,FALSE) ] # even columns  
+p.name<-names(p.value)
+
+
+df.mm_long<-pivot_longer(df.mm, cols=mm.name, names_to = "MM", values_to = "mm_value") # reshape data based on mm
+df.mm_long<-df.mm_long %>% dplyr::select(lipid_class, metabolite_name, moduleColor, tail(names(.), 2))
+
+df.p_long<-pivot_longer(df.mm, cols=p.name, names_to = "p", values_to = "p_value") # reshape data based on mm
+df.p_long<-df.p_long %>% dplyr::select(lipid_class, metabolite_name, moduleColor, tail(names(.), 2))
+
+# combine p value and mm
+df_long<- cbind(df.mm_long, df.p_long[, -c(1:4)])
+df_long$MM<-gsub("MM.", "", df_long$MM)
+
+df_long[,c(5:6)]<-lapply(df_long[,c(5:6)], as.numeric)
+
+#number of lipids in each module
+count_module <- wgcna %>%
+  dplyr::group_by(moduleColor) %>%
+  dplyr::summarize(count_module = n()) 
+
+# number of lipid class in each module
+count_class<- wgcna%>%
+  dplyr::group_by(moduleColor, lipid_class) %>%
+  dplyr::summarize(count_class = n())
+
+
+#count hub lipid in the module
+
+count_hub<-df_long%>% filter(moduleColor==MM) %>% group_by(moduleColor) %>% mutate(if_hub = ifelse(abs(mm_value)>=0.6, "hub", "non_hub")) %>%
+   dplyr::group_by(moduleColor, if_hub) %>%
+  dplyr::summarize(count_hub = n()) %>%
+  filter(!moduleColor=="grey")
+
+
+
+# hub lipids in different lipid class
+count_hub_class<-df_long %>% filter(moduleColor==MM) %>% group_by(moduleColor) %>% mutate(if_hub = ifelse(abs(mm_value>=0.6), "hub", "non_hub")) %>%
+   dplyr::group_by(moduleColor, lipid_class, if_hub) %>%
+  dplyr::summarize(count_hub = n()) 
+
+# lipids in module (remove grey module)
+
+count_module<-count_module %>% arrange(-count_module) %>% mutate(module=paste0("M",seq(0,13,1)))
+module_col<-structure(count_module$moduleColor, names=count_module$module)
+
+ggplot(data=filter(count_module, !moduleColor=="grey")) +
+  geom_bar(aes(x = reorder(moduleColor,-count_module), y = count_module, fill=moduleColor),              color="grey",stat = "identity", position = "stack", alpha = 0.9) +
+  geom_text(aes(x = moduleColor, y = count_module+3, label = count_module), 
+            size = 6, vjust=0.8) +
+  scale_fill_identity()+
+  labs(x = "Modules", y = "lipids (n)") +
+  ggtitle("Number of lipids in module") +
+  theme_bw() +
+  theme(legend.position = "top",
+        panel.grid.major = element_blank(), axis.title = element_text(size=17),
+        panel.grid.minor = element_blank(),
+        axis.line = element_blank(), 
+        axis.text.x = element_text(size=17, angle=45,vjust=1, hjust=1), 
+        axis.text.y = element_text(size = 14),
+        plot.title = element_text(hjust = 0.5,size=17))+
+  scale_x_discrete(labels=paste0("M", seq(1,13,1)))
+
+# lipids in lipid class 
+count_class<-count_class %>% filter(!moduleColor=="grey")
+count_class$moduleColor <- factor(count_class$moduleColor, levels=c("#1f77b4", "#ff7f0e", "gold",   "black", "#2ca02c", "#9467bd", "#bcbd22", "#d62728", "#8c564b","#C49A00", "#F1C7AF", "#e377c2", "#0000FF"))
+
+p<-ggplot(data=count_class,aes(y =reorder(lipid_class, count_class), x = moduleColor, fill=moduleColor))+
+  geom_point(aes(size = as.numeric(count_class)), shape = 21, stroke = 0,  color="grey") +
+  scale_x_discrete(labels=paste0("M",seq(1,13,1)))+
+     #scale_fill_gradient2(low = "blue", high = "red", midpoint = 50 )+
+      scale_fill_identity()+ ylab("Lipid class")+ 
+    ggtitle("No. of lipids in the module by lipid class") + labs(size="No. of lipid")+
+    theme_classic() + xlab("Modules")+
+    theme(axis.text.x = element_text(size=15, angle=45,vjust=1, hjust=1), 
+          axis.text.y = element_text(size = 15),
+          plot.title = element_text(size=17,hjust=0.5), legend.text = element_text(size=16), legend.title = element_text(size=16), axis.title = element_text(size=17)
+    )
+p+scale_size(range = c(4, 8))
+
+# hub lipids vs. non_hub
+
+hub<-count_hub %>% filter(if_hub=="hub") %>% left_join(count_module, by="moduleColor") %>% filter(!moduleColor=="grey") %>% mutate(pct=(count_hub/count_module)*100)
+count_hub$moduleColor <- factor(count_hub$moduleColor, levels=c("#1f77b4", "#ff7f0e", "gold",   "black", "#2ca02c", "#9467bd", "#bcbd22", "#d62728", "#8c564b","#C49A00", "#F1C7AF", "#e377c2", "#0000FF"))
+
+library(ggbreak)
+p=ggplot(data=filter(count_hub, !moduleColor=="grey")) +
+  geom_bar(aes(x = as.factor(moduleColor), y = count_hub, fill=if_hub),
+           stat = "identity", position = "stack", alpha = 0.9, color = "black") +
+  geom_text(hub, mapping=aes(x = as.factor(moduleColor), y = count_module,label =paste0( round(pct,1),"%")), size = 5, vjust=-1, hjust=0.2, angle=30)+ 
+  #geom_text(aes(x = as.factor(moduleColor), y = count_hub,label = count_hub), size = 4,  position = position_stack(vjust = 0.5))+ 
+  labs(x = "Modules", y = "count") +
+  scale_fill_manual(values= c("hub"= "#E69F00", "non_hub" = "#999999"),
+                    labels = c("hub"= "hub lipid", "non_hub" = "less relevant"), name = "") + 
+  ggtitle("hub lipids vs no hubs") +
+  theme_classic() +
+  theme(legend.position = "top", legend.text = element_text(size=14),
+        panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank(),
+        axis.text.x = element_text(angle = 45, size = 16,vjust=1, hjust=1), 
+        axis.text.y = element_text(size = 16),
+        plot.title = element_text(size=17, hjust = 0.5), axis.title=element_text(size=17))+
+   scale_x_discrete(labels=paste0("M", seq(1,13,1)))+ylim(c(0,90))
+  
+  
+  p+scale_y_break(c(30, 60), scale="free",ticklabels=c(60,70,80), space = 0.4)
+
+```
+#prepare WGCNA for ORA
+*consensus modules are the same in both diet and control
+*use one for running analysis
+```{r}
+
+# ======wgcna_all======
+#select hub lipid in the module
+
+hub_lipid<-df_long%>% filter(moduleColor==MM) %>% group_by(moduleColor) %>% mutate(if_hub = ifelse(mm_value>=0.6, "hub", "non_hub")) %>% filter(if_hub=="hub")
+
+# total lipids in the modules
+
+
+total_lipid<-df_long %>% filter(moduleColor==MM) %>% group_by(moduleColor) 
+
+count_total <- total_lipid %>%
+  dplyr::group_by(lipid_class) %>%
+  dplyr::summarize(count_total = n())
+
+
+count_module <- hub_lipid %>% filter(!moduleColor=="grey") %>%
+  dplyr::group_by(moduleColor, lipid_class) %>%
+  dplyr::summarize(count_module = n()) 
+
+# merge
+# create replicate count columns for count_total
+n <- length(unique(count_module$moduleColor)) # n = 11 modules, no grey module
+count_total_rep <- cbind(count_total, rep(count_total[,which(names(count_total) == "count_total")], n-1 )) # replicate the total column  times
+
+names(count_total_rep)
+mm<-unique(count_module$moduleColor)
+
+names(count_total_rep)[2:length(count_total_rep)] <- mm
+
+#names(count_total_rep)<-gsub("MM.", "", names(count_total_rep))
+
+count_module$moduleColor<- as.factor(count_module$moduleColor)
+
+count <- count_total_rep %>%
+  reshape2::melt(id = "lipid_class")  %>%
+  dplyr::rename(moduleColor = variable, count_total = value) %>% 
+  left_join(count_module, by = c("lipid_class", "moduleColor")) 
+
+count$count_module[is.na(count$count_module)] <- 0
+
+count_pct <- count %>%
+  mutate(count_pct = count_module/count_total) # for count heatmap
+
+# text = count, color = percentage
+range(count_pct$count_pct)
+
+```
+# plot individually 
+```{r plot individually for each tissue (counts)}
+library(RColorBrewer)
+    #filter(count_total >= 10)
+text_size=2
+    ggplot(count_pct ,aes(as.factor(moduleColor), fct_rev(lipid_class))) +
+    geom_tile(aes(fill = count_pct)) +
+    geom_text(aes(label = count_module), size=text_size) +
+    scale_fill_gradientn(colors = brewer.pal(9, "Greens"), 
+                         na.value = "white",
+                         #limits = c(-1,1),
+                         #breaks = c(-1, -0.5, 0, 0.5, 1),
+                         name = "Percentage"
+    ) +
+    xlab("") + ylab("") + # label xy variables
+    ggtitle("module Lipid class Count") + 
+    theme_bw() +
+    theme(axis.ticks.y=element_blank(),
+          axis.ticks.x=element_blank(),
+          axis.line = element_blank(),  # remove lines and ticks on two sides of figure
+          axis.text.x = element_text(angle = 90, size = 7), # adjust angle and size of x variables
+          axis.text.y = element_text(size = 7),
+          #legend.position = "none", # remove legend
+          #plot.margin = margin(0.1, 0.1, 0.1, 0.1, "cm"), # adjust figure margin (get ready for contenating)
+          text = element_text(size=10) # adjust font size of xy labels
+    )
+  
+
+```
+#Fisher test
+function
+lipid class enrichment analysis
+perform one-sided fisher test, and then only show positive enrichment
+```{r Fisher test}
+
+library(qvalue)
+class.fisher<- function(cluster.count, total.count ){
+  
+  classes<-as.character(cluster.count[,1]) 
+  
+  # # create contingency matrices
+  # each for a lipid class within the query vs. universe
+  contingency.matrix<- list()
+  
+  for (i in 1:length(classes)) {
+    contingency.matrix[[i]]<- matrix(NA,ncol=2,nrow=2)
+    contingency.matrix[[i]][1,1]<- cluster.count[classes[i]==cluster.count[,1],2]
+    contingency.matrix[[i]][1,2]<- total.count[classes[i]==total.count[,1],2]
+    contingency.matrix[[i]][2,1]<- sum(cluster.count[,2])-contingency.matrix[[i]][1,1]
+    contingency.matrix[[i]][2,2]<- sum(total.count[,2])-contingency.matrix[[i]][1,2]
+  }
+  
+  names(contingency.matrix) <- classes
+  
+  ## set up fisher test output table
+  fisher.results<-data.frame(matrix(NA, nrow=length(classes), ncol=8))
+  colnames(fisher.results)<- c("Classifier","Count.query","Count.universe","%.query","%.universe","p-value", "FDR.q-value","Fold.change")
+  fisher.results$Classifier <- classes
+  
+  # run fisher test
+  # run a for loop for each contingency matrix 
+  
+  for (i in 1:length(classes)) {
+    test<-fisher.test(contingency.matrix[[i]],alternative="greater")
+    fisher.results$`p-value` [i]<-test$p.value
+    fisher.results$Count.query [i]<- paste(contingency.matrix[[i]][1,1],"/",sum(cluster.count[,2]), sep="")
+    fisher.results$Count.universe [i]<- paste(contingency.matrix[[i]][1,2],"/",sum(total.count[,2]), sep="")
+    fisher.results$`%.query` [i]<- cluster.count[classes[i]==cluster.count[,1],2]/sum(cluster.count[,2])*100
+    fisher.results$`%.universe`[i]<- total.count[classes[i]==total.count[,1],2]/sum(total.count[,2])*100
+    fisher.results$Fold.change [i]<- fisher.results$`%.query`[i]/fisher.results$`%.universe`[i]
+  }
+  
+  
+  # fix raw p-values
+  fisher.results$`p-value`[is.na(fisher.results$`p-value`)|fisher.results$`p-value`==TRUE|fisher.results$`p-value`>1]<-1
+  # calculate q-value
+  if(length(fisher.results$`p-value`)<=1){fisher.results$`FDR.q-value`<-1}else{fisher.results$`FDR.q-value`<- qvalue(fisher.results$`p-value`,lambda=0)$qvalues}
+  
+  fisher.results <- fisher.results %>% arrange(`FDR.q-value`) # arrange by fdr-q
+  
+  fisher.results
+  
+}
+
+```
+# run fisher function
+```{r run fisher function}
+# class.fisher<- function(cluster.count, total.count )
+# input: 2-col count tables for cluster and background: cluster.count, total.count
+
+# loop within tissue
+count2 <- count %>%
+  filter(count_total >=1) 
+colnames(count2)[2]<-"moduleColor"  
+
+fisher_res <- list() # define an empty list
+
+for (i in unique(count2$moduleColor)) {
+  
+  cluster.count <- dplyr::select(count2[count2$moduleColor == i,], lipid_class, count_module)
+  total.count <- dplyr::select(count2[count2$moduleColor == i,], lipid_class, count_total)
+  fisher_res[[i]] <- class.fisher(cluster.count, total.count)
+  
+}
+
+
+# convert list to data frame
+# with an additional column of list name
+class_enr_res <- do.call(rbind, lapply(names(fisher_res), 
+                                       function(i){ data.frame(group=i, fisher_res[[i]])}))
+
+names(class_enr_res)[2:9] <- names(fisher_res[[1]])
+
+library(kableExtra)
+class_enr_res %>%
+  #filter(`p-value` <= 0.5) %>% # 
+  kable() %>%
+  kable_styling("striped", full_width = F) %>%
+  scroll_box(width = "100%", height = "500px")
+
+#save(class_enr_res, file="WGCNA_ORA.RData")
+```
+#heatmap_cluster Figure 4b
+```{r heatmap}
+## enrichment heatmap ####
+load("WGCNA_ORA.RData")
+colnames(class_enr_res)[1]<-"moduleColor"
+class_enr_res2 <- class_enr_res %>%
+  filter(Fold.change > 1) %>% # FC = 0 not wanted bc log2 transformation leads to inf (indicates not present in particular cluster); negative enrichment not shown bc it's the byproduct of positive enrichment
+  mutate(ptsize = ifelse(`FDR.q-value` < 0.05, "large", "small")) %>% filter(!moduleColor=="grey") 
+
+library(emojifont)
+mypalette <- brewer.pal(5, "Reds")
+df<-class_enr_res2
+
+df$Classifier<-recode(df$Classifier, "HexCer"="GSL","TG"="TAG")
+df$Classifier<-factor(df$Classifier, levels=c("Cer", "GSL", "SM", "PC", "PE", "PG","PS","PI","LPC","LPE","TAG","DG"))
+
+df$moduleColor<-factor(df$moduleColor, levels=c("#1f77b4", "#ff7f0e", "gold",   "black", "#2ca02c", "#9467bd", "#bcbd22", "#d62728", "#8c564b","#C49A00", "#F1C7AF", "#e377c2", "#0000FF"))
+
+Classifier=df$Classifier
+
+df_empty<-data.frame(moduleColor=rep(c("#1f77b4", "#ff7f0e", "gold",   "black", "#2ca02c", "#9467bd", "#bcbd22", "#d62728", "#8c564b","#C49A00", "#F1C7AF", "#e377c2", "#0000FF"), each=12),Classifier=rep(c("Cer", "GSL", "SM", "PC", "PE", "PG","PS","PI","LPC","LPE","TAG","DG"), 13),Fold.change=0)
+
+df$negative.log.p<--1*log10(df$`p-value`)
+bb<-c(1.3, 3)
+
+labels<-c("p=0.05", "p=0.001")
+x=c("#1f77b4", "#ff7f0e", "gold",   "black", "#2ca02c", "#9467bd", "#bcbd22", "#d62728", "#8c564b","#C49A00", "#F1C7AF", "#e377c2", "#0000FF")
+
+x_col=c("#1f77b4", "#ff7f0e", "gold",   "black", "#2ca02c", "#9467bd", "#bcbd22", "#d62728", "#8c564b","#C49A00", "#F1C7AF", "#e377c2", "#0000FF")
+
+
+data1<-data.frame(y = x, x =0.5)
+data1$y<-factor(data1$y, levels=c("#1f77b4", "#ff7f0e", "gold",   "black", "#2ca02c", "#9467bd", "#bcbd22", "#d62728", "#8c564b","#C49A00", "#F1C7AF", "#e377c2", "#0000FF"))
+
+#png(filename="wgcna_enrichment.png", res=150, height=15, width=10, units = "cm")
+plot_ora=ggplot(df_empty, aes(y= moduleColor, x = Classifier))+
+  geom_tile(fill = "white", size=0.5, color="grey")+
+  geom_point(df, mapping=aes(color = Fold.change, size = negative.log.p))+
+  labs(color="Enrichment")+
+  scale_size_continuous(range = c(2,7), name = "FDR",
+                        guide = guide_legend(override.aes = list(colour = "grey")), breaks=bb, labels=labels)+
+  scale_x_discrete(position="top")+ 
+  scale_y_discrete(position="left", limit=x_col, labels=paste0("M", seq(1,13,1)))+
+  #geom_text(aes(label = ), color = "black", size = 4.5, vjust=1.9)+
+  geom_text(data = data.frame(y = x, x =0.5), aes(x = x, y = y),color = x_col, label = "\u25A0", size =18, hjust=0.85) +
+#  geom_text(data = data.frame(x = x, y =9.65), aes(x = x, y = y),color = x_col, label = #"\u25A0", size =17, vjust=0.4)
+  scale_color_gradientn(colors=mypalette, breaks=c(10,20,30))+
+   guides(size = guide_legend(order = 1), 
+          color=guide_colourbar(direction = "horizontal", title.position = "top")) +
+  coord_fixed(ratio=0.9, expand=TRUE)+
+  theme_minimal()+
+  theme(panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        axis.title.x=element_blank(),
+        axis.title.y=element_blank(),
+        axis.text.x.top=element_text(size=24, angle=45, hjust = 0.1),
+        axis.text.y=element_text(size=24, color="black"), 
+        legend.text=element_text(size=20, vjust=0.6),
+        legend.title=element_text(size=20, vjust=0.9),
+        axis.ticks.x = element_blank(),
+        legend.key.height = unit(0.7,"cm"), legend.position="bottom", legend.direction = "vertical", legend.box = "horizontal")
+plot_ora
+
+
+
+```
+# tSNE analysis-lipidomics_covariate adjusted (Figure 4c)
+```{r}
+library(BiocGenerics)
+# only M1 has over 70 lipids and do the MM>0.6
+Lipid_1<-wgcna %>% 
+  dplyr::select(-contains(c("p.MM","Diagnosis","grey"))) %>%
+  filter(!moduleColor=="grey") %>%
+  mutate(across(c(4:16), as.numeric)) %>%
+  group_by(moduleColor) %>%
+  arrange(-`MM.#1f77b4`) %>% 
+  dplyr::slice(1:20) %>%
+  filter(!metabolite_name=="PS(16:0_18:1)") %>%
+  ungroup()
+
+lipid_species<-Lipid_1[,3]
+
+Lipid_1[,c(4:16)]<-lapply(Lipid_1[,c(4:16)], as.numeric)
+Lipid_data1<-as.matrix(Lipid_1[,c(4:16)])
+
+  
+library(Rtsne)
+tsne_results <- Rtsne(Lipid_data1, perplexity=20, check_duplicates = FALSE)
+# Plotting the first image
+plot(tsne_results$Y, col = "blue", pch = 19, cex = 1.5) 
+
+sne<-data.frame(x=tsne_results$Y[,1], y=tsne_results$Y[,2], moduleColor=lipid_species)
+
+module_color=c("#1f77b4"="#1f77b4", "#ff7f0e"="#ff7f0e", "gold"="gold", "black"="black", "#2ca02c"="#2ca02c", "#9467bd"="#9467bd", "#bcbd22"="#bcbd22", "#d62728"="#d62728", "#8c564b"="#8c564b","#C49A00"="#C49A00", "#F1C7AF"="#F1C7AF", "#e377c2"="#e377c2", "#0000FF"="#0000FF")
+
+sne$moduleColor<-factor(sne$moduleColor, levels=c("#1f77b4", "#ff7f0e", "gold",   "black", "#2ca02c", "#9467bd", "#bcbd22", "#d62728", "#8c564b","#C49A00", "#F1C7AF", "#e377c2", "#0000FF"))
+
+sne_plot=ggplot(sne)+
+  geom_point(aes(x=x,y=y, fill=moduleColor), color="grey", size=3.5, shape=21)+
+  xlab("Dimension 1")+ylab("Dimension 2")+
+  scale_fill_manual(values=module_color, "Module", labels=c("M1","M2","M3","M4","M5","M6","M7","M8","M9","M10","M11","M12","M13"))+
+    guides(fill=guide_legend(override.aes = list(size=5, shape=21, color=module_color,byrow=TRUE, nrow=4)))+
+  theme_bw()+
+  theme(panel.grid = element_blank(), axis.title = element_text(size=28), axis.text = element_text(size=24), legend.title = element_text(size=28), legend.text = element_text(size=28), legend.position = "bottom")
+sne_plot
+
+
+
+
+
+```
+# Figure 4a
+```{r}
+df_cor<-data.frame(cor=moduleTraitCor, p=moduleTraitPvalue)
+df_cor_long <- df_cor %>%
+  dplyr::select(-contains("Diagnosis")) %>%
+  rownames_to_column("moduleColor") %>%
+  mutate(moduleColor=gsub("ME","",moduleColor)) %>%
+  mutate(module=case_when(moduleColor=="#1f77b4"~"M1",
+                          moduleColor=="#ff7f0e"~"M2",
+                          moduleColor=="gold"~"M3",
+                          moduleColor=="black"~"M4",
+                          moduleColor=="#2ca02c"~"M5",
+                          moduleColor=="#9467bd"~"M6",
+                          moduleColor=="#bcbd22"~"M7",
+                          moduleColor=="#d62728"~"M8",
+                          moduleColor=="#8c564b"~"M9",
+                          moduleColor=="#C49A00"~"M10",
+                          moduleColor=="#F1C7AF"~"M11",
+                          moduleColor=="#e377c2"~"M12",
+                          moduleColor=="#0000FF"~"M13", TRUE ~ moduleColor)) %>%
+  filter(!moduleColor=="grey") %>%
+  pivot_longer(
+    cols = c(starts_with("cor."), starts_with("p.")),
+    names_to = c(".value", "type"),
+    names_pattern = "(cor|p)\\.(.*)",
+    values_drop_na = TRUE) %>%
+  mutate(negative.log.p=-log(p,10))
+
+
+bb<-c(1, 1.3, 3)
+labels<-c("0.1","0.05", "0.001")
+x<-c("#1f77b4", "#ff7f0e", "gold",   "black", "#2ca02c", "#9467bd", "#bcbd22", "#d62728", "#8c564b","#C49A00", "#F1C7AF", "#e377c2", "#0000FF")
+x1<-c("M1", "M2", "M3", "M4", "M5", "M6", "M7", "M8", "M9", "M10", "M11", "M12", 
+      "M13")
+y<-c("Tangles", "Amyloid", "gpath", "CERAD", "Braak", "Reagan", "GlobalCogFunc")
+aa<-c(-0.2, 0, 0.2)
+l<-c(-0.2, 0, 0.2)
+df_cor_long$module<-factor(df_cor_long$module, levels=c("M1", "M2", "M3", "M4", "M5", "M6", "M7", "M8", "M9", "M10", "M11", "M12","M13"))
+
+
+ggplot(df_cor_long, aes(x= module, y = type))+
+  geom_tile(fill = "white", color = "gray", size=1.2)+
+  geom_point(aes(color = cor, size = negative.log.p))+
+  labs(color="Correlation")+
+  scale_size_continuous(range = c(1,8), name = "P value",
+                        guide = guide_legend(override.aes = list(colour = "grey")), breaks=bb, labels=labels)+
+  scale_x_discrete(position="top")+ 
+  scale_y_discrete(position="left", limits=y)+
+  geom_text(aes(label = round(cor,2)), color = "black", size = 4.5, vjust=2.4)+
+  geom_text(data = data.frame(x = x1, y =7.3 ), aes(x = x, y = y), color = x, label = "\u25A0", size =22, vjust=0.05) +
+  scale_color_gradient2(low = "blue", mid="white", high = "red", breaks=aa, labels=l)+
+  coord_fixed(ratio=1.1, expand=TRUE)+ 
+  theme_minimal()+
+  theme(axis.title.x=element_blank(),
+        axis.title.y=element_blank(),
+        axis.text.x.top=element_text(size=15, color="black"),
+        axis.text.y=element_text(size=15, color="black"), 
+        legend.text=element_text(size=15, vjust=0.6),
+        legend.title=element_text(size=15, vjust=0.9),
+        legend.key.height = unit(0.7,"cm"), legend.direction = "horizontal", legend.position="bottom")
+
+```
+# Figure 4 d e f g
+```{r}
+
+# lipid module
+
+me_long<-MEs %>% 
+  rownames_to_column("NAME") %>% 
+  left_join(data_corrected_1[,c(1:2)], by="NAME") %>%
+  pivot_longer(cols=2:15, names_to = "moduleColor", values_to = "ME") %>%
+  mutate(moduleColor=gsub("ME","",moduleColor)) %>%
+  mutate(module=case_when(moduleColor=="#1f77b4"~"M1",
+                          moduleColor=="#ff7f0e"~"M2",
+                          moduleColor=="gold"~"M3",
+                          moduleColor=="black"~"M4",
+                          moduleColor=="#2ca02c"~"M5",
+                          moduleColor=="#9467bd"~"M6",
+                          moduleColor=="#bcbd22"~"M7",
+                          moduleColor=="#d62728"~"M8",
+                          moduleColor=="#8c564b"~"M9",
+                          moduleColor=="#C49A00"~"M10",
+                          moduleColor=="#F1C7AF"~"M11",
+                          moduleColor=="#e377c2"~"M12",
+                          moduleColor=="#0000FF"~"M13", TRUE ~ moduleColor)) %>%
+  filter(!moduleColor=="grey") %>%
+  mutate(Diagnosis=case_when(`CLASS:Condition`=="Normal"~"0",
+                             `CLASS:Condition`=="AAD"~"1",
+                             `CLASS:Condition`=="SAD"~"2"))
+me_long$Diagnosis<-as.numeric(me_long$Diagnosis)
+  
+me_long$`CLASS:Condition`<-recode(me_long$`CLASS:Condition`,"Normal"="Control")
+me_long$`CLASS:Condition`<-factor(me_long$`CLASS:Condition`, levels=c("Control","AAD","SAD"))
+
+colnames(me_long)[2]<-"type"
+
+# look at which one is significant among three groups
+bxp <- ggboxplot(me_long, x = "type", y = "ME") +
+  scale_y_continuous(expand = expansion(mult = c(0.05, 0.1)))
+
+# Add the p-value to the boxplot
+facet(bxp, facet.by = "module") + stat_kruskal_test()
+
+# calculate the cor and p values
+list<-list()
+for(i in unique(me_long$module)){
+data<-filter(me_long, module==i)
+result=bicorAndPvalue(data$Diagnosis, y = data$ME, 
+             use = "pairwise.complete.obs", 
+             alternative = c("two.sided")
+             )
+list[[i]] <- result
+}
+
+results_bicor<-do.call(rbind, lapply(names(list), function(x){data.frame(module=x,list[[x]])}))
+#significant ones: M12,M13,M2,M5
+
+m2=ggplot(filter(me_long,module=="M2"), aes(x=type, y=ME))+geom_boxplot(color="black", fill="#ff7f0e", outlier.colour="black",alpha=0.5)+geom_jitter(color="#ff7f0e")+
+  theme_bw()+ggtitle("M2")+ylab("Eigenlipid Value")+
+  scale_y_continuous(limits=c(-0.2,0.21), expand = c(0,0.05), breaks=c(-0.2,0,0.2))+
+  theme(panel.grid = element_blank(),axis.title.y = element_text(size=22), axis.text.y =element_text(size=20),
+        axis.text.x=element_text(size=22), legend.position = "none", axis.title.x.bottom = element_blank(),
+        plot.title =element_text(size=24, hjust=0.5) )+
+  annotate(geom="text",x=1.61, y=0.21,label=paste0("Cor=",round(list[["M2"]][["bicor"]],2), ", p=", round(list[["M2"]][["p"]],3)), size=8)
+
+#ggsave("figure.4e.png",width=5,height=5, units="in", plot=m4)
+#ggsave("figure.4e.pdf",width=5.2,height=5, units="in", plot=m4)
+
+m5=ggplot(filter(me_long,module=="M5"), aes(x=type,y=ME))+geom_boxplot(color="black", fill="#2ca02c", outlier.colour="black",alpha=0.5)+geom_jitter(color="#2ca02c")+
+  theme_bw()+ggtitle("M5")+ylab("Eigenlipid Value")+
+  scale_y_continuous(limits=c(-0.2,0.21), expand = c(0,0.05), breaks=c(-0.2,0,0.2))+
+  theme(panel.grid = element_blank(),axis.title.y = element_text(size=22), axis.text.y =element_text(size=20),
+        axis.text.x=element_text(size=22), legend.position = "none", axis.title.x.bottom = element_blank(),
+        plot.title =element_text(size=24, hjust=0.5) )+
+  annotate(geom="text",x=1.55, y=0.21,label=paste0("Cor=",round(list[["M5"]][["bicor"]],2), ", p=", round(list[["M5"]][["p"]],3)), size=8)
+
+#ggsave("figure.4d.png",width=5,height=5, units="in", plot=m3)
+#ggsave("figure.4d.pdf",width=5.2,height=5, units="in", plot=m3)
+
+m12=ggplot(filter(me_long,module=="M12"), aes(x=type,y=ME))+geom_boxplot(color="black", fill="#e377c2", outlier.colour="black",alpha=0.5)+geom_jitter(color="#e377c2")+
+  theme_bw()+ggtitle("M12")+ylab("Eigenlipid Value")+
+  scale_y_continuous(limits=c(-0.2,0.21), expand = c(0,0.05), breaks=c(-0.2,0,0.2))+
+  theme(panel.grid = element_blank(),axis.title.y = element_text(size=22), axis.text.y =element_text(size=20),
+        axis.text.x=element_text(size=22), legend.position = "none", axis.title.x.bottom = element_blank(),
+        plot.title =element_text(size=24, hjust=0.5) )+
+  annotate(geom="text",x=1.55, y=0.21,label=paste0("Cor=",round(list[["M12"]][["bicor"]],2), ", p=", round(list[["M12"]][["p"]],3)), size=8)
+
+
+m13=ggplot(filter(me_long,module=="M13"), aes(x=type,y=ME))+geom_boxplot(color="black", fill="#0000FF", outlier.colour="black",alpha=0.5)+geom_jitter(color="#0000FF")+
+  theme_bw()+ggtitle("M13")+ylab("Eigenlipid Value")+
+  scale_y_continuous(limits=c(-0.2,0.21), expand = c(0,0.05), breaks=c(-0.2,0,0.2))+
+  theme(panel.grid = element_blank(),axis.title.y = element_text(size=22), axis.text.y =element_text(size=20),
+        axis.text.x=element_text(size=22), legend.position = "none", axis.title.x.bottom = element_blank(),
+        plot.title =element_text(size=24, hjust=0.5) )+
+  annotate(geom="text",x=1.55, y=0.21,label=paste0("Cor=",round(list[["M13"]][["bicor"]],2), " ,p=", round(list[["M13"]][["p"]],3)), size=8)
+
+ggarrange(m2,NULL,m5,NULL,m12,NULL,m13, ncol=1, heights = c(1,0.08,1,0.08,1,0.08,1))
+#ggsave("figure_4defg.png",dpi=300, height=18,width=5, units="in")
+
+#bitmap <- pdf_render_page("figure_4defg.pdf", page = 1, dpi = 300)
+#png::writePNG(bitmap, "figure_4defg.png",dpi=300)
+
+```
+# proteomic and lipidomic integration (module-module) Figure 5a  and Figure S9
+```{r}
+# =====Integrated omics (using WGCNA results)=====
+# loading the datasets
+
+proteomics<-read.csv(file = "MEs from Eric Dammer ROSMAP.csv", header = TRUE, sep=",")
+proteomics<-proteomics %>% arrange(NAME) 
+dim(proteomics)
+
+lipidomics<-MEs %>% rownames_to_column("NAME") %>%  filter(NAME %in% proteomics$NAME) %>% arrange(NAME) %>% column_to_rownames("NAME")
+#lipidomics<-lipidomics %>% dplyr::select(-MEgrey)  # for network
+dim(lipidomics)
+
+clinicals<-read.csv(file = "clinical traits. ROSMAP.csv", header = TRUE, sep=",")
+clinicals <- clinicals %>% arrange(NAME) %>% column_to_rownames("NAME")
+dim(clinicals)
+
+types<-read.csv(file = "Type.csv", header = TRUE, sep=",")
+types <- types %>% arrange(NAME) %>% column_to_rownames("NAME") %>% mutate(Class=case_when(Type=="Normal"~"Control", TRUE ~Type))
+
+proteomics<-proteomics %>% column_to_rownames("NAME")
+
+# convert to numeric matrix
+L<-as.matrix(lipidomics)
+L1<-matrix(as.numeric(L), nrow=nrow(L))
+
+P<-as.matrix(proteomics)
+P1<-matrix(as.numeric(P), nrow=nrow(P))
+
+C<-as.matrix(clinicals)
+C1<-matrix(as.numeric(C), nrow=nrow(C))
+
+T<-factor(types$Class, levels= c("Control", "AAD", "SAD")) 
+
+ROSMAP<- list(L,P, C, T)
+names(ROSMAP)=c("lipidomics", "proteomics", "clinicals", "types")
+
+# set a list of all the X dataframes
+data = list(l_ME = ROSMAP$lipidomics, 
+            p_ME = ROSMAP$proteomics,
+            cl=ROSMAP$clinicals)
+
+lapply(data, dim) # check their dimensions
+
+Y = ROSMAP$types # set the response variable as the Y df
+summary(Y)
+
+list.keepX = c(30, 30) # select arbitrary values of features to keep
+list.keepY = c(13, 13)  # clinical data only has 8
+list.keepZ = c(8, 8)  # clinical data only has 8
+
+# generate three pairwise PLS models
+pls1 <- spls(data[["l_ME"]], data[["p_ME"]], 
+             keepX = list.keepY, keepY = list.keepX) 
+pls2 <- spls(data[["l_ME"]], data[["cl"]], 
+             keepX = list.keepY, keepY = list.keepZ)
+pls3 <- spls(data[["p_ME"]], data[["cl"]], 
+             keepX = list.keepX, keepY = list.keepZ)
+
+# plot features of first PLS
+plotVar(pls1, cutoff = 0.1, title = "(a) lipidomic VS proteomic", 
+        legend = c("lipidomic", "proteomic"), 
+        var.names = FALSE, style = 'graphics', 
+        pch = c(16, 17), cex = c(2,2), 
+        col = c('darkorchid', 'lightgreen'))
+
+# plot features of second PLS
+plotVar(pls2, cutoff = 0.1, title = "(b) lipidomic VS clinical", 
+        legend = c("lipidomic", "clinical"), 
+        var.names = FALSE, style = 'graphics', 
+        pch = c(16, 17), cex = c(2,2), 
+        col = c('darkorchid', 'lightgreen'))
+
+# plot features of third PLS
+plotVar(pls3, cutoff = 0.1, title = "(c) proteomic VS clinical", 
+        legend = c("proteomic", "clinical"), 
+        var.names = FALSE, style = 'graphics', 
+        pch = c(16, 17), cex = c(2,2), 
+        col = c('darkorchid', 'lightgreen'))
+
+# calculate correlation of lipidomic and proteomic
+cor(pls1$variates$X, pls1$variates$Y) 
+
+# calculate correlation of lipidomic and clinical
+cor(pls2$variates$X, pls2$variates$Y) 
+
+# calculate correlation of protein and clinical
+cor(pls3$variates$X, pls3$variates$Y) 
+
+# for square matrix filled with 0.1s
+design = matrix(0.5, ncol = length(data), nrow = length(data), 
+                dimnames = list(names(data), names(data)))
+diag(design) = 0 # set diagonal to 0s
+
+design
+
+# form basic DIABLO model
+basic.diablo.model = block.splsda(X = data, Y = Y, ncomp = 5, design = design) 
+
+# run component number tuning with repeated CV
+perf.diablo = perf(basic.diablo.model, validation = 'Mfold', 
+                   folds = 10, nrepeat = 10) 
+
+plot(perf.diablo) # plot output of tuning
+
+# set the optimal ncomp value
+ncomp = perf.diablo$choice.ncomp$WeightedVote["Overall.BER", "mahalanobis.dist"] 
+# show the optimal choice for ncomp for each dist metric
+perf.diablo$choice.ncomp$WeightedVote 
+
+# set grid of values for each component to test
+test.keepX = list (l_ME = c(5:9, seq(10, 18, 2), seq(20,30,5)), 
+                   p_ME = c(5:9, seq(10, 18, 2), seq(20,30,5)),
+                   cl = c(5:9, seq(10, 18, 2), seq(20,30,5)))
+
+test.keepX = list (l_ME = c(2:10), 
+                   p_ME = c(2:10, seq(11,40,3)),
+                   cl = c(2:8))
+
+# run the feature selection tuning
+tune.TCGA = tune.block.splsda(X = data, Y = Y, ncomp = ncomp, 
+                              test.keepX = test.keepX, design = design,
+                              validation = 'Mfold', folds = 10, nrepeat = 1,
+                              dist = "mahalanobis.dist",
+                               measure = "BER")
+
+list.keepX = tune.TCGA$choice.keepX # set the optimal values of features to retain
+list.keepX
+final.diablo.model = block.splsda(X = data, Y = Y, ncomp = ncomp, 
+                                  keepX = list.keepX, design = design)
+
+final.diablo.model$design # design matrix for the final model
+
+plotDiablo(final.diablo.model, ncomp = 1,col.per.group=c("seagreen3","tomato1", "slateblue1"))
+
+plotIndiv(final.diablo.model, ind.names = FALSE, legend = TRUE, 
+          title = 'DIABLO Sample Plots',col=c("seagreen3","tomato1", "slateblue1"),style = "ggplot2",cex = c(1.5,1.5,1.5))
+
+plotArrow(final.diablo.model, ind.names = FALSE, legend = TRUE, 
+          title = 'DIABLO', col=c("tomato1", "seagreen3", "slateblue1"))
+
+plotVar(final.diablo.model, var.names = FALSE, 
+        style = 'graphics', legend = TRUE,
+        pch = c(16, 17, 15), cex = c(1.5,1.5,1.5), 
+        col = c("seagreen3","tomato1", "slateblue1"))
+# =====replot plsda 5A=====
+# select the modules for plsda plot
+l_me_1<-selectVar(final.diablo.model, block = 'l_ME', comp = 1)$l_ME$name 
+l_me_2<-selectVar(final.diablo.model, block = 'l_ME', comp = 2)$l_ME$name 
+p_me_1<-selectVar(final.diablo.model, block = 'p_ME', comp = 1)$p_ME$name 
+p_me_2<-selectVar(final.diablo.model, block = 'p_ME', comp = 2)$p_ME$name 
+
+
+lipidomics_selected<-lipidomics %>% dplyr::select(l_me_1,l_me_2)
+proteomics_selected<-proteomics %>% dplyr::select(p_me_1,p_me_2)
+
+# convert to numeric matrix
+L<-as.matrix(lipidomics_selected)
+L1<-matrix(as.numeric(L), nrow=nrow(L))
+
+P<-as.matrix(proteomics_selected)
+P1<-matrix(as.numeric(P), nrow=nrow(P))
+
+C<-as.matrix(clinicals)
+C1<-matrix(as.numeric(C), nrow=nrow(C))
+
+T<-factor(types$Class, levels= c("Control", "AAD", "SAD")) 
+
+ROSMAP<- list(L,P, C, T)
+names(ROSMAP)=c("lipidomics", "proteomics", "clinicals", "types")
+
+# set a list of all the X dataframes
+data = list(l_ME = ROSMAP$lipidomics, 
+            p_ME = ROSMAP$proteomics,
+            cl=ROSMAP$clinicals)
+
+lapply(data, dim) # check their dimensions
+
+Y = ROSMAP$types # set the response variable as the Y df
+summary(Y)
+
+design = matrix(0.5, ncol = length(data), nrow = length(data), 
+                dimnames = list(names(data), names(data)))
+diag(design) = 0 # set diagonal to 0s
+
+design
+
+model = block.splsda(X = data, Y = Y, ncomp = 2, design = design) 
+
+
+model_pc<-plotIndiv(model,ind.names = FALSE, legend = TRUE, comp=1:2, ellipse = TRUE, star=TRUE,
+          col = c("tomato1", "seagreen3", "slateblue1"), legend.position = "right",blocks = "weighted.average",
+          style = "ggplot2", pch = c(16,16,16), 
+          size.legend=23, size.legend.title=23, size.xlabel=23, layout = NULL) # XY
+
+model_pc1<-plotIndiv(model,ind.names = FALSE, legend = TRUE, comp=1:2, ellipse = TRUE, star=TRUE,
+          col = c("tomato1", "seagreen3", "slateblue1"), legend.position = "right",blocks = "average",
+          style = "ggplot2", pch = c(16,16,16), 
+          size.legend=23, size.legend.title=23, size.xlabel=23, layout = NULL) # X ONLY
+
+#=====Figure 5a======
+
+plsda1<-data.frame(x=model_pc$df$x,y=model_pc$df$y,group=model_pc$df$group)
+
+plsda1$group<-recode(plsda1$group, "Normal"="Control")
+plsda1$group<-factor(plsda1$group, levels=c("AAD","Control","SAD"))
+type_col=c("AAD"="tomato1","Control"="seagreen3","SAD"="slateblue1")
+
+f5a=ggplot(plsda1, aes(x=x, y=y)) + geom_point(size=2.5,aes(fill=group, color=group, shape=group), alpha=0.7)+
+ scale_fill_manual(values=type_col, labels=c("AAD","Control","SAD"), "")+
+  guides(fill=guide_legend(nrow=1 ,override.aes = list(shape =c(21,22,23), size=4, color=c("tomato1", "seagreen3", "slateblue1"))))+
+  scale_shape_manual(values=c(21,22,23), guide=FALSE)+
+  scale_color_manual(values= c("tomato1", "seagreen3", "slateblue1"), guide=FALSE)+
+  theme_bw()+ ggtitle("Consensus plot")+
+  #xlab("XY-Variate 1")+
+  #ylab("XY-Variate 2")+
+  labs(x = "Variate 1: average", 
+       y = "Variate 2: average")+
+  theme(legend.key=element_blank(), legend.position = "bottom",
+        axis.text.x = element_text(colour = "black", size = 56), 
+        axis.text.y = element_text(colour ="black", size = 56), 
+        legend.text = element_text(size = 58, colour ="black"), 
+        legend.title = element_text(size = 58),
+        axis.title = element_text(size=58), plot.title = element_text(size=60, hjust=0.5, face="bold"),
+        panel.grid.major = element_blank(), panel.grid.minor = element_blank())+
+  stat_ellipse(
+               aes(color = group), alpha = 0.7)+stat_stars(aes(color = group))
+f5a
+
+plsda2<-data.frame(x=model_pc1$df$x,y=model_pc1$df$y,group=model_pc1$df$group)
+
+plsda2$group<-recode(plsda2$group, "Normal"="Control")
+plsda2$group<-factor(plsda2$group, levels=c("AAD","Control","SAD"))
+type_col=c("AAD"="tomato1","Control"="seagreen3","SAD"="slateblue1")
+
+
+#=====Figure S9d======
+
+S9d=ggplot(plsda2, aes(x=x, y=y)) + geom_point(size=2.5,aes(fill=group, color=group, shape=group), alpha=0.7)+
+ scale_fill_manual(values=type_col, labels=c("AAD","Control","SAD"), "")+
+  guides(fill=guide_legend(nrow=1 ,override.aes = list(shape =c(21,22,23), size=4, color=c("tomato1", "seagreen3", "slateblue1"))))+
+  scale_shape_manual(values=c(21,22,23), guide=FALSE)+
+  scale_color_manual(values= c("tomato1", "seagreen3", "slateblue1"), guide=FALSE)+
+  theme_bw()+ ggtitle("Consensus plot_block X")+
+  #xlab("XY-Variate 1")+
+  #ylab("XY-Variate 2")+
+  labs(x = "Variate 1: average", 
+       y = "Variate 2: average")+
+  theme(legend.key=element_blank(), legend.position = "bottom",
+        axis.text.x = element_text(colour = "black", size = 56), 
+        axis.text.y = element_text(colour ="black", size = 56), 
+        legend.text = element_text(size = 58, colour ="black"), 
+        legend.title = element_text(size = 58),
+        axis.title = element_text(size=58), plot.title = element_text(size=60, hjust=0.5, face="bold"),
+        panel.grid.major = element_blank(), panel.grid.minor = element_blank())+
+  stat_ellipse(
+               aes(color = group), alpha = 0.7)+stat_stars(aes(color = group))
+
+
+# =====replot loading Figure S9e S9f S9g=====
+S_9e=plotLoadings(final.diablo.model, comp = 1, contrib = 'max', method = 'mean',legend.color= c("seagreen3","tomato1", "slateblue1"), size.legend = 1.5,max.name.length =  50,block = 1,size.labs = 20,
+             size.axis=1.5, title="Lipid module",how.ties=TRUE, legend=FALSE,size.name=1.2)
+
+S_9f=plotLoadings(final.diablo.model, comp = 1, contrib = 'max', method = 'mean',legend.color= c("seagreen3","tomato1", "slateblue1"), size.legend = 1.5,max.name.length =  50,block = 2,size.labs = 20,
+             size.axis=1.5, title="Protein module",how.ties=TRUE, legend=FALSE,size.name=1.2,ndisplay=20)
+
+S_9g=plotLoadings(final.diablo.model, comp = 1, contrib = 'max', method = 'mean',legend.color= c("seagreen3","tomato1", "slateblue1"), size.legend = 1.5,max.name.length =  50,block = 3,size.labs = 20,
+             size.axis=1.5, title="Clinical trait",how.ties=TRUE,size.name=1.2,legend=FALSE)
+
+#======network======
+
+network.res <- network(final.diablo.model,blocks = c(1,2,3),
+        color.node = c("tomato1", "seagreen3", "slateblue1"), cutoff = 0.2)
+write_graph(network.res$gR, file = "network0.6.gml", format = "gml")
+
+# export to cytoscape for figure 5b
+
+corMat<-circosPlot(final.diablo.model, cutoff = 0.6, line = TRUE,
+           color.blocks= c("tomato1", "seagreen3", "slateblue1"),
+           color.cor = c("chocolate3","grey20"), size.labels = 3, size.variables = 1)
+write.csv(corMat, file="cormat form Diablo_COADJ_05012025.csv")
+
+
+cimDiablo(final.diablo.model, comp= c(1,3))
+
+
+```
+#Figure 5c
+```{r}
+library(gridBase)
+#library(chorddiag)
+# convert correlation mat to long format
+# selected M13 "#0000FF", M12 "#e377c2", M2 "#ff7f0e"
+
+# make the first letter uppercase
+firstup <- function(x) {
+  substr(x, 1, 1) <- toupper(substr(x, 1, 1))
+  x
+}
+
+corMat_long<-corMat %>% data.frame %>%
+  dplyr::select(`ME.0000FF_l`,`ME.e377c2_l`,`ME.ff7f0e_l`,`green_p`,`purple_p`,`black_p`,`greenyellow_p`) %>% 
+  rownames_to_column("TARGET") %>% 
+  pivot_longer(cols=2:8, names_to = "SOURCE", values_to = "WEIGHT") %>% 
+  filter(!str_detect(TARGET,"ME.")) %>% 
+  filter(abs(WEIGHT)>0.7) %>% 
+  dplyr::select(SOURCE,TARGET,WEIGHT) %>%
+  filter(!SOURCE==TARGET) %>%
+  mutate(SOURCE=case_when(SOURCE=="ME.0000FF_l"~"M13",
+                          SOURCE=="ME.e377c2_l"~"M12",
+                          SOURCE=="ME.ff7f0e_l"~"M2",
+                          SOURCE=="purple_p"~"Purple",
+                          SOURCE=="green_p"~"Green",
+                          SOURCE=="greenyellow_p"~"Greenyellow",
+                          SOURCE=="black_p"~"Black")) %>%
+  arrange(SOURCE) %>% 
+  mutate(TARGET=gsub("_p","",TARGET)) %>%
+  mutate(TARGET=firstup(TARGET)) %>%
+  mutate(TARGET=gsub("Gpa","gpa",TARGET)) # fix Gpath->gpath
+
+df = data.frame(from = corMat_long$SOURCE,
+to = corMat_long$TARGET,
+value = corMat_long$WEIGHT,
+stringsAsFactors = FALSE)
+
+#legend
+color_fun <- colorRamp2(c(-1, -0.8, -0.7, 0, 0.7, 0.8, 1), 
+                        colors = c("royalblue3", "royalblue2", "royalblue1", "white", "tomato1", "tomato2", "tomato3"),
+                        transparency = 0.5)
+
+
+lgd_list <- Legend(title = "Correlation", type = "grid", col_fun = color_fun,
+                   title_gp = gpar(fontsize = 14), # Increase title font size
+                   labels_gp = gpar(fontsize = 12), title_position = "topcenter",title_gap = unit(3, "mm"), direction="horizontal") # Increase labels font size
+grid.draw(lgd_list)
+
+
+#plot.new()
+
+#circos.initializeWithIdeogram(plotType = NULL)
+
+grid.col= c(Diagnosis= "grey" , Reagan= "grey",	Braak= "grey",
+CERAD= "grey" ,	gpath= "grey", Tangles="grey", M13= "#0000FF" , M12= "#e377c2", M2="#ff7f0e",	'Purple'="purple", 'Black'="black", 'Green'="#238b45",'Greenyellow'="greenyellow")
+# highlight links
+border_df=data.frame(module=c(rep("M2",3),rep("M13",3)),
+c("Greenyellow", "Green", "Black"),
+rep("black",6))
+
+color_fun <- colorRamp2(c(-1,-0.8,-0.7, 0, 0.7,0.8,1), colors = c("royalblue3","royalblue2","royalblue1", "white", "tomato1","tomato2","tomato3"))
+
+
+#circos plot
+circlize_plot_dollar = function() {
+  #circos.initialize(NULL)
+  #set gap.degree (number of  many variables= number of gap degree)
+circos.par(gap.degree = c(2, 2, 2, 2, 2, 2, 2, 2, 2,2,2,2,2))
+# change grid color
+
+#create two empty tracks
+par(mar = c(1, 1, 1, 1))
+chordDiagram(df, grid.col=grid.col, order=c("Diagnosis" , "Reagan",	"Braak",
+"CERAD",	"gpath", "Tangles","M13", "M12", "M2", "Greenyellow",	"Purple", "Black", "Green"),
+#col =ifelse(df$value > 0, "red", "dodgerblue1"),
+col=color_fun(df$value),transparency = 0.5,
+directional = TRUE, annotationTrack = "grid", annotationTrackHeight = 0.05, link.lwd =1, link.lty=1,
+link.border = border_df,
+preAllocateTracks = list(
+list(track.height = 0.06),
+list(track.height = 0.06)))
+# add arc
+all_sectors = get.all.sector.index()
+rou1 = get.cell.meta.data("yplot", sector.index = all_sectors[1], track.index = 1)[1]
+rou2 = get.cell.meta.data("yplot", sector.index = all_sectors[1], track.index = 2)[2]
+start.degree = get.cell.meta.data("xplot", sector.index = all_sectors[3], track.index = 1)[1]
+end.degree = get.cell.meta.data("xplot", sector.index = all_sectors[1], track.index = 1)[2]
+draw.sector(start.degree, end.degree, rou1, rou2, clock.wise = TRUE, col = "white", border = NA)
+#get the coordinate of text
+m = reverse.circlize( (start.degree + end.degree)/2, 1, sector.index = all_sectors[1], track.index = 1)
+circos.text(m[1, 1], m[1, 2], "AD clinical traits", cex = 2, facing = "bending.inside", adj = c(0.5, 0.8), niceFacing = TRUE,
+sector.index = all_sectors[2], track.index = 1)
+start.degree = get.cell.meta.data("xplot", sector.index = all_sectors[1], track.index = 1)[1]
+end.degree = get.cell.meta.data("xplot", sector.index = all_sectors[6], track.index = 1)[2]
+draw.sector(start.degree, end.degree, rou1, rou2, clock.wise = TRUE, col = "lightsalmon", border = NA)
+# add other group names
+start.degree = get.cell.meta.data("xplot", sector.index = all_sectors[7], track.index = 1)[1]
+end.degree   = get.cell.meta.data("xplot", sector.index = all_sectors[9], track.index = 1)[2]
+draw.sector(start.degree, end.degree, rou1, rou2, clock.wise = TRUE, col = "lightgreen", border = NA)
+m = reverse.circlize( (start.degree + end.degree)/2, 1, sector.index = all_sectors[1], track.index = 1)
+circos.text(m[1, 1], m[1, 2], "Lipid module", cex = 2, facing = "bending.inside", adj = c(0.5, 0.5), niceFacing = TRUE,
+sector.index = all_sectors[1], track.index = 1)
+start.degree = get.cell.meta.data("xplot", sector.index = all_sectors[10], track.index = 1)[1]
+end.degree  = get.cell.meta.data("xplot", sector.index = all_sectors[13], track.index = 2)[2]
+draw.sector(start.degree, end.degree, rou1, rou2, clock.wise = TRUE, col = "royalblue", border = NA)
+m = reverse.circlize( (start.degree + end.degree)/2, 1, sector.index = all_sectors[1], track.index = 1)
+circos.text(m[1, 1], m[1, 2], "Protein module", cex = 2, facing = "bending.inside", adj = c(0.5, 0.9), niceFacing = TRUE,
+sector.index = all_sectors[1], track.index = 1)
+# Add labeing back to the figure
+circos.track(track.index = 2, panel.fun = function(x, y) {
+circos.text(CELL_META$xcenter, CELL_META$ylim[1], CELL_META$sector.index,
+facing = "bending.inside", niceFacing = TRUE, adj = c(0.5, 0.1),cex=1.8)
+}, bg.border =NA)
+ 
+    
+
+  circos.clear()
+}
+
+
+circlize_plot_dollar()
+
+
+
+```
+#Figure 5d
+```{r}
+#====xmwas using https://kuppal.shinyapps.io/xmwas/====
+
+# data preparation (sample on column and lipid or protein names on row)
+
+#lipid
+# selected M13 "#0000FF", M12 "#e377c2", M2 "#ff7f0e"
+wgcna_selected<-wgcna %>% filter(moduleColor %in%  c("#ff7f0e", "#0000FF","#e377c2")) 
+
+wgcna_selected<-wgcna_selected[c(1:12),]  # choose top 5 MM
+xmwas_lipid<-data_corrected_1 %>% dplyr::select(NAME,wgcna_selected$metabolite_name) %>% t() %>% data.frame %>% row_to_names(row_number = 1) 
+
+# protein
+xmwas_p1<-read.csv("C:/cyc/ROSMAP publication/plot data/04262022_lipidomic analysis/xMWAS/proteomic_imputed_05092022.csv")
+
+# type
+data_clinical_1 
+
+# match all the subject information
+xmwas_clinicals<-xmwas_clinicals %>% t() %>% data.frame %>% row_to_names(row_number = 1) %>% dplyr::select(colnames(xmwas_p1)[-1]) 
+which(is.na(xmwas_clinicals))
+dim(xmwas_clinicals) #clinical
+
+xmwas_lipid<-xmwas_lipid %>% dplyr::select(colnames(xmwas_clinicals))
+dim(xmwas_lipid) #lipid
+
+xmwas_p<-xmwas_p1 %>% dplyr::select(NAME,colnames(xmwas_clinicals)) 
+dim(xmwas_p)  # protein
+
+xmwas_type<-data_clinical_1 %>% filter(NAME %in% colnames(xmwas_clinicals)) %>% dplyr::select(NAME, `CLASS:Condition`) %>% mutate(Class=case_when(`CLASS:Condition`=="Normal"~"Control", TRUE~`CLASS:Condition`)) %>% dplyr::select(-`CLASS:Condition`)
+dim(xmwas_type)   #classlabel
+
+# save to csv files for xmwas online (folder: C:\cyc\ROSMAP publication\manuscript\ROSMAP\figures_R\ROSMAP\xmwas)
+
+#write.csv(xmwas_clinicals, file="xmwas_clinicals.csv")
+#write.csv(xmwas_lipid, file="xmwas_lipid.csv")
+#write.csv(xmwas_p, file="xmwas_p.csv")
+#write.csv(xmwas_type, file="xmwas_type.csv")
+
+#====results=====
+xmwas_cor<-read.csv("C:/cyc/ROSMAP publication/manuscript/ROSMAP/figures_R/ROSMAP/XMWAS_module_cor_06042025.csv", header=TRUE, check.names = FALSE)
+
+xmwas_cor_long<-xmwas_cor %>% 
+  pivot_longer(cols=2:13, values_to = "cor", names_to = "lipid") %>%
+  mutate(weight=abs(cor)) %>%
+  filter(weight>0.5) %>%
+  dplyr::select(-weight) %>%
+  pivot_wider(names_from = "lipid", values_from = "cor")
+#write.csv(xmwas_cor_long, file="xmwas_cor_0.5_06042025.csv")
+
+# =====re-load correlation with id mapping=====
+
+l_p_cor_id<-read.csv("C:/cyc/ROSMAP publication/manuscript/ROSMAP/figures_R/ROSMAP/for GO analysis.csv")
+
+id_library<-read.csv("C:/cyc/ROSMAP publication/manuscript/ROSMAP/figures_R/ROSMAP/xmwas/idmapping_2025_06_13.csv")
+
+l_p_cor_id<-left_join(x=l_p_cor_id,y=id_library,by=c("uniprot"="From"))
+
+#=====gene enrichment analysis=====
+library(clusterProfiler)
+library(enrichplot)
+library(wordcloud)
+
+organism = "org.Hs.eg.db"
+
+library(organism, character.only = TRUE)
+
+df <- l_p_cor_id %>% 
+  filter(lipids == "M13::LPE(22:5)") %>%
+  mutate(weight = abs(cor)) %>%
+  dplyr::select(ENSG_version, ENSG, weight) %>%
+  group_by(ENSG) %>%
+  slice_max(order_by = weight, n = 1, with_ties = FALSE) %>%
+  ungroup()
+
+# name the vector
+gene_list<-df$weight
+names(gene_list) <- df$ENSG
+
+# sort the list in decreasing order (required for clusterProfiler)
+gene_list = sort(gene_list, decreasing = TRUE)
+
+
+gse <- gseGO(geneList=gene_list, 
+             ont ="ALL", 
+             keyType = "ENSEMBL", 
+             nPerm = 10000, 
+             minGSSize = 3, 
+             maxGSSize = 800, 
+             pvalueCutoff = 0.05, 
+             verbose = TRUE, 
+             OrgDb = organism, 
+             pAdjustMethod = "none")
+
+#LPC22_6<-gse@result
+#LPC18_1<-gse@result
+#LPE22_6<-gse@result
+#LPE20_4<-gse@result
+#LPE22_4<-gse@result
+#LPC16_0<-gse@result
+#LPC15_0<-gse@result
+#LPE22_5<-gse@result
+
+go_list<-list(LPC22_6,LPC18_1,LPE22_6,LPE20_4,LPE22_4,LPC16_0,LPC15_0,LPE22_5)
+
+names(go_list)<-c("M13::LPC(22:6)", "M2::LPC(18:1)",  "M2::LPE(22:6)",  "M2::LPE(20:4)" ,"M2::LPE(22:4)",  "M2::LPC(16:0)",  "M13::LPC(15:0)", "M13::LPE(22:5)")
+
+go_list_results <- do.call(rbind, lapply(names(go_list), 
+                                       function(i){ data.frame(lipids=i, go_list[[i]])}))
+
+#review
+#write.csv(go_list_results, file="go_list_results_06132025.csv")
+
+library(clusterProfiler)
+library(dplyr)
+
+# Define the lipids of interest
+lipids_of_interest <- c("M13::LPC(22:6)", "M2::LPC(18:1)", "M2::LPE(22:6)", 
+                        "M2::LPE(20:4)", "M2::LPE(22:4)", "M2::LPC(16:0)", 
+                        "M13::LPC(15:0)", "M13::LPE(22:5)")
+
+# convert to GENE ID
+library(org.Hs.eg.db)
+gene_id<- select(org.Hs.eg.db, 
+                     keys = unique(l_p_cor_id$ENSG), 
+                     columns = "SYMBOL", 
+                     keytype = "ENSEMBL")
+
+gene_id[250,2]<-"H3BN98" # manually add it because conversion did not make it
+
+n_occur <- data.frame(table(gene_id$ENSEMBL))
+list_dup <- n_occur[n_occur$Freq > 1,] # 0
+
+gene_id_dup<-gene_id %>% 
+  filter(ENSEMBL %in% list_dup$Var1) %>%
+  mutate(SYMBOL=case_when(ENSEMBL=="ENSG00000146147"~"MLIP",
+                          ENSEMBL=="ENSG00000182621"~"PLCB1",
+                          ENSEMBL=="ENSG00000197912"~"SPG7",
+                          ENSEMBL=="ENSG00000203668"~"CHML", TRUE~ SYMBOL)) %>%
+  filter(!duplicated(SYMBOL))
+
+gene_id<-gene_id %>%
+  filter(!ENSEMBL %in% list_dup$Var1) %>%
+  bind_rows(gene_id_dup)   # gene id
+  
+l_p_cor_id_gene<-left_join(x=l_p_cor_id,y=gene_id, by=c("ENSG"="ENSEMBL"))
+
+# Function to run gseGO for a given lipid
+run_gseGO_for_lipid <- function(lipid_name) {
+  df <- l_p_cor_id_gene %>% 
+    filter(lipids == lipid_name) %>%
+    mutate(weight = abs(cor)) %>%
+    filter(weight>0.5) %>%
+    dplyr::select(ENSG_version, ENSG, weight,SYMBOL) %>%
+    group_by(SYMBOL) %>%
+    slice_max(order_by = weight, n = 1, with_ties = FALSE) %>%
+    ungroup()
+  
+  gene_list <- df$weight
+  names(gene_list) <- df$SYMBOL
+  gene_list <- sort(gene_list, decreasing = TRUE)
+  
+  gse <- gseGO(geneList = gene_list, 
+               ont = "ALL", 
+               keyType = "SYMBOL", #ENSEMBL
+               nPerm = 10000, 
+               minGSSize = 5, 
+               maxGSSize = 800, 
+               pvalueCutoff = 0.05, 
+               verbose = FALSE, 
+               OrgDb = organism, 
+               pAdjustMethod = "none")
+  
+  return(gse@result)
+}
+
+# Run the analysis for each lipid
+go_list <- lapply(lipids_of_interest, run_gseGO_for_lipid)
+names(go_list) <- lipids_of_interest
+
+# Combine all results into one data frame
+go_list_results <- do.call(rbind, lapply(names(go_list), function(i) {
+  data.frame(lipids = i, go_list[[i]])
+}))
+
+go_list_results_bp<-go_list_results %>% filter(ONTOLOGY=="BP") 
+
+#review
+#write.csv(go_list_results_bp, file="go_list_results_06132025_updated_0.6.csv")
+
+# visualization
+
+go_list_results_1<-go_list_results %>%filter(lipids=="M13::LPC(22:6)")
+
+# ======plot results======
+
+#heat map for module m2 and 13
+library(pheatmap)
+library(RColorBrewer)
+library(data.table)
+
+#df1<-read.csv("C:/cyc/ROSMAP publication/manuscript/ROSMAP/figures_R/ROSMAP/go_list_results_06132025_updated_0.6.cs#v")
+df1<-read.csv("C:/cyc/ROSMAP publication/manuscript/ROSMAP/figures_R/ROSMAP/go_list_results_06132025_updated_0.6_q.csv")
+
+colnames(df1)[1]<-"geneSet"
+
+df1_wide<-df1 %>% 
+  dplyr::select(geneSet, lipids, subcategory, pvalue) %>%
+  mutate(logp=-log(pvalue, 10)) %>%
+  filter(!subcategory=="x") %>%
+  dplyr::select(-pvalue) %>%
+  pivot_wider(names_from = "lipids", values_from = "logp") %>%
+  arrange(subcategory) %>%
+  dplyr::select(geneSet, subcategory,contains("M2"), contains("M13"))
+
+df1_wide_s<-df1_wide %>% dplyr::group_by(subcategory) %>% 
+dplyr::summarize(n = n())
+
+mydf <- data.frame(row.names = seq(1,77,1), 
+                   BP = c(
+                          rep(" Cognition", 5), 
+                          rep(" Lipid metabolism", 4), 
+                          rep(" Neuronal trafficking and vesicle dynamics", 13),
+                          rep(" Neurotransmitter-mediated neural activity", 37),
+                          rep(" Post-synaptic structure and synaptic plasticity", 11),
+                          rep(" Protein & RNA Metabolism", 7)
+                       ))
+
+
+
+
+                    
+df<-df1_wide[3:7]
+# rename column
+
+setnames(df, old = c("M2::LPE(20:4)",  "M2::LPC(16:0)",  "M2::LPE(22:4)",  "M2::LPE(22:6)",  "M13::LPC(22:6)"), 
+         new = c("LPE(20:4)",  "LPC(16:0)",  "LPE(22:4)",  "LPE(22:6)",  "LPC(22:6)"))
+         
+unique_BP=unique(mydf$BP)
+bp_colors <- setNames(brewer.pal(n = length(unique_BP), name = "Dark2"), unique_BP)
+
+df[is.na(df)] = 0
+#selected M13 "#0000FF", M12 "#e377c2", M2 "#ff7f0e"
+my_sample_col<-data.frame(Module=rep(c("M2","M13"), c(4,1)))
+my_color<-list(Module=c(M2="#ff7f0e", M13="#0000FF"),
+               BP=bp_colors)
+row.names(my_sample_col)<-colnames(df)
+cols = colorRampPalette(c("white", "tomato1"))(30)
+
+
+pheatmap(df, cluster_cols = TRUE, cluster_rows = FALSE, annotation_row = mydf, annotation_col = my_sample_col, annotation_colors=my_color, gaps_row = c(5,9,22,59,70),legend = FALSE, annotation_legend = FALSE,
+          cellwidth=17, cellheight=11, fontsize=13, name = "-log(P value)",show_rownames=TRUE,labels_row = df1_wide$geneSet,
+         angle_col = "315", na_col="white", color = cols, clustering_distance_cols = "euclidean")
+
+
+
+
+# legend
+library(ComplexHeatmap)
+library(grid)
+
+# Define legend components
+lgd_modules <- Legend(
+  labels = c("M2", "M13"),
+  legend_gp = gpar(fill = c("#ff7f0e","#0000FF")),
+  title = "Modules"
+)
+
+lgd_bp <- Legend(
+  labels = c(
+    "Cognition", 
+    "Lipid metabolism", 
+    "Neuronal trafficking and vesicle dynamics", 
+    "Neurotransmitter-mediated neural activity", 
+    "Post-synaptic structure and synaptic plasticity", 
+    "Protein & RNA Metabolism"
+  ),
+  legend_gp = gpar(fill = bp_colors),
+  title = "BP"
+)
+
+lgd_gradient <- Legend(
+  col_fun = colorRamp2(c(0, 3), c("white", "red")),
+  title = "-log(P value)"
+)
+
+# Combine and draw the legends
+
+draw(packLegend(lgd_modules, lgd_bp, lgd_gradient, direction = "vertical"))
+
+
+```
+#Figure S3, S4, S5
+```{r}
+#=====FIGURE S3======
+#chain_double bond_plot
+library(tidyverse)
+library(janitor)
+library(reshape2)
+library("RColorBrewer")
+library(dplyr)
+LC<-read.csv(file = "C:/cyc/ROSMAP publication/manuscript/ROSMAP/figures_R/ROSMAP/lipidomic data_SERRF_1.csv", sep = ",", header = TRUE, row.names = 1)
+#use data_corrected_t
+
+#keep columns of chain, double bond and lipid class
+LC<-data_corrected_t %>% dplyr::select(NAME, lipid_class, total_carbon,total_db, 12:327) %>% column_to_rownames("NAME")
+
+# keep PC
+df <- filter(LC, !grepl('DG|MAG|AcCa|ChE', lipid_class))
+
+# combine some lipid class
+df$lipid_class<-recode(df$lipid_class, "PC_e"="PC","PE_p"="PE","PE_e"="PE")
+
+# calculate mean in each sample
+df_mean <- aggregate(x = df[4:length(df)],   # extract column 4:end, which are sample level normalized data 
+                     by = list(df$total_carbon, df$total_db, df$lipid_class), 
+                     FUN = "mean", # alternatively, use FUN = "mean" here instead calculates sum of TAG species
+                     na.rm=TRUE, na.action=NULL) 
+colnames(df_mean)[1]<-"chain"
+colnames(df_mean)[2]<-"desaturation"
+colnames(df_mean)[3]<-"class"
+# transpose and add sample class info, in order to calculate group mean
+
+# transpose 
+df_mean_t <- df_mean %>%
+  unite(TFA, class, chain, desaturation, sep = ":") %>%
+  tibble::column_to_rownames(var="TFA") %>%
+  t() %>%
+  as.data.frame() 
+
+# add  AD group label to dataset
+
+df_mean_t$Diagnosis = c(rep("AAD", 77), 
+                        rep("Control", 92), 
+                        rep("SAD", 147))
+
+# calculate AD group mean 
+df_class_mean <- aggregate(x = df_mean_t[1:252], # column 1:244 are data columns
+                           by = list(df_mean_t$Diagnosis), 
+                           FUN = "mean",
+                           na.rm=TRUE, na.action=NULL) 
+colnames(df_class_mean)[1]<-"Diagnosis"
+
+# scale/center data for final visualization
+df_scale <- data.frame(df_class_mean[,c(1)], # keep the first meta data column
+                       scale(df_class_mean[,-c(1)]) # and scale (z-score) data
+)
+
+names(df_scale) <- names(df_class_mean) # fix names that are messed up in the previous step
+
+# turn data into long format for plotting
+df_plot <- df_scale %>%
+  melt(id = c("Diagnosis")) %>%
+  separate(variable, into = c("class", "chain","desaturation"), sep = ":") 
+
+range(df_plot$value)
+
+#df_plot$class<-dplyr::recode(df_plot$class, "TG"="TAG")
+df_plot$Diagnosis<-factor(df_plot$Diagnosis, levels = c("Control","AAD","SAD"))
+
+# make the plot
+P1<-ggplot(data = df_plot[c(1:333),], aes(x = as.numeric(chain), y = as.numeric(desaturation))) +
+  geom_tile(aes(fill = value), color = "black", lwd = 0.5) +
+  facet_grid(class~Diagnosis) +
+  scale_fill_gradientn(colors = rev(brewer.pal(11, "RdBu")),
+                       na.value = "grey90",
+                       limits = c(-1.2, 1.2), # this helps make sure the color palette are centered (0 = white)
+                       #breaks = c(1,2,3,4),
+                       name = "Normalized value"
+  ) +
+  labs(x = "Chain length", y = "Double bond") +
+  ggtitle("") +
+  # figure aesthetics
+  theme_bw() +
+  theme_bw() +
+  theme(axis.ticks.y=element_blank(),
+        axis.ticks.x=element_blank(), axis.title = element_text(size=12),
+        axis.line = element_blank(), strip.text = element_text(size=12),
+        axis.text.x = element_text(angle = 0, size = 12),
+        axis.text.y = element_text(size = 12),
+        plot.title = element_text(hjust = 0.5), legend.position = "bottom", legend.text=element_text(size=12))
+
+P2<-ggplot(data = df_plot[c(334:732),], aes(x = as.numeric(chain), y = as.numeric(desaturation))) +
+  geom_tile(aes(fill = value), color = "black", lwd = 0.5) +
+  facet_grid(class~Diagnosis) +
+  scale_fill_gradientn(colors = rev(brewer.pal(11, "RdBu")),
+                       na.value = "grey90",
+                       limits = c(-1.2, 1.2), # this helps make sure the color palette are centered (0 = white)
+                       breaks = c(-1,0,1),
+                       name = "Normalized value"
+  ) +
+  labs(x = "Chain length", y = "Double bond") +
+  ggtitle("") +
+  # figure aesthetics
+  theme_bw() +
+  theme(axis.ticks.y=element_blank(),
+        axis.ticks.x=element_blank(),axis.title = element_text(size=12),
+        axis.line = element_blank(), strip.text = element_text(size=12),
+        axis.text.x = element_text(angle = 0, size = 12),
+        axis.text.y = element_text(size = 12),
+        plot.title = element_text(hjust = 0.5), legend.position = "bottom", legend.text=element_text(size=12))
+
+library(ggpubr)
+S3=ggarrange(P1,P2, nrow=1, align="v")
+S3
+
+
+#======== facet by chain_Box plots with p-values   TG Figure S4b S5b=======   
+library(ggpubr)
+library(rstatix)
+
+colnames(df_plot)[3]<-"Acyl_chain"
+colnames(df_plot)[4]<-"DB"
+tg<-df_plot %>% filter(class=="TAG")
+bxp <- ggboxplot(
+  tg, x = "Diagnosis", y = "value", color = "Diagnosis", 
+  palette = c("seagreen3","tomato1", "slateblue1"), 
+  facet.by ="Acyl_chain", add="jitter",
+short.panel.labs = FALSE, xlab="AD phenotype", ylab="Z_scored value"
+)+
+  scale_color_manual(labels=c("Control", "AAD", "SAD"), values= c("seagreen3","tomato1", "slateblue1"))+
+  theme(legend.position = c(0.9,0.1), axis.text.x = element_blank(), axis.ticks.x = element_blank(), axis.title.x = element_blank(), strip.text = element_text(size=14),
+        legend.title = element_text(size=13), legend.text = element_text(size=13))
+        
+
+TG_CHAIN=bxp+
+stat_compare_means(step.increase = 0.23, tip.length = 0,
+  method = "t.test", label="p.signif",
+  comparisons=list(c("Control","AAD"), c("Control", "SAD"), c("AAD", "SAD"))
+)+
+  scale_y_continuous(expand = expansion(mult = c(0, 0.25)))
+
+
+# rename column
+
+#fix the order
+df_plot$DB=factor(df_plot$DB, levels=c("0","1","2", "3", "4",
+                                                               "5", "6", "7", "8", "9",
+                                                               "10","11","12"))
+
+bxp <- ggboxplot(
+  tg, x = "Diagnosis", y = "value", color = "Diagnosis", 
+  palette = c("seagreen3","tomato1", "slateblue1"), 
+  facet.by ="DB", add="jitter", ncol=8,
+  short.panel.labs = FALSE, xlab="", ylab="Z_scored value"
+)+
+   scale_color_manual(labels=c("Control", "AAD", "SAD"), values= c("seagreen3","tomato1", "slateblue1"))+
+  theme(legend.position = c(0.7,0.25), axis.text.x = element_blank(), axis.ticks.x = element_blank(), axis.title.x = element_blank(), strip.text = element_text(size=14),
+        legend.title = element_text(size=13), legend.text = element_text(size=13))
+
+
+TG_DB=bxp+
+  stat_compare_means(step.increase = 0.23, tip.length = 0,
+                     method = "t.test", label="p.signif",
+                     comparisons=list(c("Control","AAD"), c("Control", "SAD"), c("AAD", "SAD"))
+  )+
+  scale_y_continuous(expand = expansion(mult = c(0, 0.25)))
+
+#======== facet by chain_Box plots with p-values   PC Figure S4a S5a=======   
+
+pc<-df_plot %>% filter(class %in% c("PC","PE","LPC","LPE","PS","PI","PG"))
+bxp <- ggboxplot(
+  pc, x = "Diagnosis", y = "value", color = "Diagnosis", 
+  palette = c("seagreen3","tomato1", "slateblue1"), 
+  facet.by ="Acyl_chain", add="jitter", 
+short.panel.labs = FALSE, xlab="AD phenotype", ylab="Z_scored value"
+)+
+  scale_color_manual(labels=c("Control", "AAD", "SAD"), values= c("seagreen3","tomato1", "slateblue1"))+
+  theme(legend.position = "top", legend.direction = "horizontal", axis.text.x = element_blank(), axis.ticks.x = element_blank(), axis.title.x = element_blank(), strip.text = element_text(size=15),
+        legend.title = element_text(size=15), legend.text = element_text(size=15))
+
+a<-facet(bxp,facet.by="Acyl_chain", nrow = 3, short.panel.labs = FALSE)        
+
+PC_CHAIN=a+
+stat_compare_means(step.increase = 0.23, tip.length = 0,
+  method = "t.test", label="p.signif",
+  comparisons=list(c("Control","AAD"), c("Control", "SAD"), c("AAD", "SAD"))
+)+
+  scale_y_continuous(expand = expansion(mult = c(0, 0.25)))
+
+
+#fix the order
+df_plot$DB=factor(df_plot$DB, levels=c("0","1","2", "3", "4",
+                                                               "5", "6", "7", "8", "9",
+                                                               "10","11","12"))
+
+bxp <- ggboxplot(
+  pc, x = "Diagnosis", y = "value", color = "Diagnosis", 
+  palette = c("seagreen3","tomato1", "slateblue1"), 
+  facet.by ="DB", add="jitter", ncol=8,
+  short.panel.labs = FALSE, xlab="", ylab="Z_scored value"
+)+
+   scale_color_manual(labels=c("Control", "AAD", "SAD"), values= c("seagreen3","tomato1", "slateblue1"))+
+  theme(legend.position = c(0.92,0.25), axis.text.x = element_blank(), axis.ticks.x = element_blank(), axis.title.x = element_blank(), strip.text = element_text(size=17),
+        legend.title = element_text(size=16), legend.text = element_text(size=16), axis.title.y = element_text(size=15), axis.text.y = element_text(size=14))
+
+bxp<-facet(bxp, facet.by="DB", short.panel.labs = FALSE, ncol = 7)
+
+PC_DB=bxp+
+  stat_compare_means(step.increase = 0.23, tip.length = 0,
+                     method = "t.test", label="p.signif",
+                     comparisons=list(c("Control","AAD"), c("Control", "SAD"), c("AAD", "SAD"))
+  )+
+  scale_y_continuous(expand = expansion(mult = c(0, 0.25)))
+
+#ggsave("figure S5A.png",plot=PC_DB, width=10, height=4, dpi=300)
+
+#ggsave("figure S5B.png",plot=TG_DB, width=10, height=4, dpi=300)
+
+#ggsave("figure S4A.png",plot=PC_CHAIN, width=12, height=8, dpi=300)
+
+#ggsave("figure S4B.png",plot=TG_CHAIN, width=10, height=8, dpi=300)
+
+```
+#Figure S10
+```{r}
+library(ComplexUpset)
+library(ComplexHeatmap)
+library(UpSetR)
+
+df1<-read.csv("C:/cyc/ROSMAP publication/manuscript/ROSMAP/figures_R/ROSMAP/go_list_results_06132025_updated_0.6.csv")
+colnames(df1)[1]<-"geneSet"
+df1_wide<-df1 %>% 
+  dplyr::select(geneSet, lipids, subcategory, pvalue) %>%
+  mutate(logp=-log(pvalue, 10))
+
+dea_sig_wide <- df1_wide %>% 
+  dplyr::select(geneSet, lipids) %>%
+  mutate(present = 1) %>%
+  tidyr::spread(lipids, present) %>%
+  replace(is.na(.), 0)
+
+df1_wide<-l_p_cor_id_gene %>% 
+  dplyr::select(lipids, SYMBOL,cor) 
+
+df1_filtered <- df1_wide %>%
+  group_by(lipids, SYMBOL) %>%
+  filter(n() == 1) %>%
+  ungroup()
+
+
+dea_sig_wide <- df1_filtered %>% 
+  dplyr::select(SYMBOL, lipids) %>%
+  mutate(present = 1) %>%
+  group_by(lipids) %>%
+  tidyr::spread(lipids, present) %>%
+  replace(is.na(.), 0) 
+
+
+dea_sig_wide_binary <- as.data.frame(lapply(dea_sig_wide[,-1], function(x) as.integer(x != 0)))
+
+
+m = make_comb_mat(dea_sig_wide)
+
+colnames(dea_sig_wide_binary)<-colnames(dea_sig_wide[,-1])
+
+dea_sig_wide_binary<-dea_sig_wide_binary %>% dplyr::select(`M2::LPE(22:6)`,`M2::LPE(22:4)`,`M2::LPE(20:4)`,`M2::LPC(18:1)`,`M2::LPC(16:0)`,`M13::LPC(15:0)`,`M13::LPE(22:5)`,`M13::LPC(22:6)`)
+
+
+png("upset_plot.png", width = 2000, height = 1500, res=300)
+upset(dea_sig_wide_binary, nsets = 8, decreasing = c(F, T))
+
+dev.off()
+
+```
+# answering reviewer's question
+```{r}
+#Because of the significant association between LPC 20:4 and LPC 22:6 with APOE risk, the authors #should check that the following still hold true after covariate adjustment:
+
+data_cor_selected<-data_corrected_1 %>%
+  dplyr::select(APOErisk, `LPC(20:4)`,`LPC(22:6)`,`Hex1Cer(d18:1_24:1)`, contains("Cer"),`CLASS:Condition`)
+
+library(Hmisc)
+
+flattenCorrMatrix <- function(cormat, pmat) {
+  ut <- upper.tri(cormat)
+  data.frame(
+    row = rownames(cormat)[row(cormat)[ut]],
+    column = rownames(cormat)[col(cormat)[ut]],
+    cor  =(cormat)[ut],
+    p = pmat[ut]
+    )
+}
+df_aad<-filter(data_cor_selected, `CLASS:Condition`=="AAD")
+mat_aad<-rcorr(as.matrix(df_aad[,-73]), type = "spearman")
+df_sad<-filter(data_cor_selected, `CLASS:Condition`=="SAD")
+mat_sad<-rcorr(as.matrix(df_sad[,-73]), type = "spearman")
+df_c<-filter(data_cor_selected, `CLASS:Condition`=="Normal")
+mat_c<-rcorr(as.matrix(df_c[,-73]), type = "spearman")
+
+cor_aad<-flattenCorrMatrix(mat_aad$r, mat_aad$P)
+cor_sad<-flattenCorrMatrix(mat_sad$r, mat_sad$P)
+cor_c<-flattenCorrMatrix(mat_c$r, mat_c$P)
+
+
+cor_aad<-cor_aad %>% mutate(direction=ifelse(cor<0,"royalblue","tomato1")) %>%  filter(row=="APOErisk") %>% mutate(weight=abs(cor)) %>%
+  left_join(df_lipid_class[,c(1:2)], by=c("column"="NAME")) %>% mutate(class="AAD")
+
+cor_sad<-cor_sad %>% mutate(direction=ifelse(cor<0,"royalblue","tomato1")) %>%  filter(row=="APOErisk")%>% mutate(weight=abs(cor)) %>%
+  left_join(df_lipid_class[,c(1:2)], by=c("column"="NAME")) %>% mutate(class="SAD")
+
+cor_c<-cor_c %>% mutate(direction=ifelse(cor<0,"royalblue","tomato1")) %>% filter(row=="APOErisk") %>% mutate(weight=abs(cor)) %>%
+  left_join(df_lipid_class[,c(1:2)], by=c("column"="NAME")) %>% mutate(class="Control")
+# 
+cor<-rbind(cor_sad,cor_aad,cor_c)
+cor$class<-factor(cor$class, levels=c("Control","AAD","SAD"))
+
+# previous correlation without covariate adjustment
+cor_b<-cor_b %>% filter(row=="APOErisk")
+
+library(ggridges)
+ggplot(cor, aes(x = cor, y = class)) +
+  geom_density_ridges(aes(fill = class),alpha = 0.7,scale=1, quantile_lines=TRUE, quantiles=0.5, quantile_linetype = "dotted", rel_min_height = 0.005) +
+  labs(y = "", x = "Corr")+
+  facet_wrap(~lipid_class, ncol=3)+theme_bw()+
+  geom_vline(xintercept=c(-0.2,0.2), linetype="dashed", color="blue")+
+  scale_fill_manual(values = c("seagreen3","tomato1", "slateblue1")) +
+  theme(legend.position = "none", panel.grid = element_blank())+ggtitle("Correlation to APOE-risk")+
+  scale_x_continuous(limits = c(-0.4, 0.4))+scale_y_discrete(expand=c(0.1,-0.1))
+
+
+
+```
+# S13 
+# iPS neuron proteomic and brain lipidomic
+```{r}
+cor<-read.csv(file="for run cor for lipidomic and neuron proteomic.csv", sep=",", row.names = 1)
+
+Abeta<-data.frame(pt=c("PPP1CA","PPP1R1A","PSMC6","PSMD10","BASP1","SYN1","GLS","CHGA","SNCG","MYL12A","STMN1","HNRNPA2B1","HNRNPC","HNRNPDL","HNRNPH1","HNRNPU","CARHSP1","FUS","ERH","KHSRP","PA2G4","SRP72","RARS1","HSD17B10","HSD17B12","ACSL4", "EML4"),
+                  Pathway=rep(c("PP1","Proteasome","Synapse","Cytoskeleton","RNA binding/splicing","Fatty acid metabolism","Microtubule"), times=c(2,2,5,2,11,4,1)), color=rep(c("#ED90A4", "#D3A263", "#99B657", "#33C192", "#00BDCE", "#94A9EC", "#DC91DB"),times=c(2,2,5,2,11,4,1)))
+
+cor_1<-cor %>%dplyr::select(matched.to.ID.Ips.neurons,Type, Abeta$pt)
+
+#data<-read.csv(file="C:/cyc/ROSMAP publication/plot data/04262022_lipidomic analysis/named lipid log2_.csv", #sep=",", row.names = 1)
+
+data_t<-data_corrected_1 %>% dplyr::select(c(1, 31:373)) %>% column_to_rownames("NAME")
+
+data_t_1<-data_t %>% rownames_to_column("ID") %>% separate(ID, c("sample","id_neuron"), sep="_")
+
+de_name<-result %>% filter(P.Value<0.05) %>%rownames_to_column("lipids")
+
+data_ipsc<-inner_join(x=cor_1,y=dplyr::select(data_t_1[,-1],id_neuron, de_name$lipids ), by=c("matched.to.ID.Ips.neurons"="id_neuron"))
+
+# correlation_ggplot2"
+data_ipsc$Type<-factor(data_ipsc$Type,levels=c("Normal","AAD","SAD"))
+
+c=ggplot(data_ipsc, aes(x=`PPP1CA`,y=`LPE(22:6)`))+
+  geom_point(aes(color=Type, fill=Type), size=3)+
+  scale_color_manual(values=c("seagreen3","tomato1", "slateblue1"), labels=c("Control","AAD","SAD"))+
+  scale_fill_manual(values=c("seagreen3","tomato1", "slateblue1"), guide=FALSE)+theme_bw()+
+geom_smooth(method = "lm", se = TRUE, color = "black", fill = "gray70") +
+  guides(color=guide_legend(override.aes = list(size=5)))+
+  theme(axis.title = element_text(size=14),axis.text = element_text(size=14), legend.text = element_text(size=14), legend.title = element_text(size=14), legend.position = "top", panel.grid = element_blank())+
+  xlab("log(Area of PPP1CA)")+
+  ylab("scaled Abs of LPE(22:6)")+
+   geom_text(x=25.7,y=-1,label="R=0.258, P=0.19", check_overlap = TRUE, size=5)
+
+b=ggplot(data_ipsc, aes(x=`PPP1R1A`,y=`LPE(22:6)`))+
+  geom_point(aes(color=Type, fill=Type), size=3)+
+  scale_color_manual(values=c("seagreen3","tomato1", "slateblue1"), labels=c("Control","AAD","SAD"))+
+  scale_fill_manual(values=c("seagreen3","tomato1", "slateblue1"), guide=FALSE)+theme_bw()+
+geom_smooth(method = "lm", se = TRUE, color = "black", fill = "gray70") +
+  guides(color=guide_legend(override.aes = list(size=5)))+
+  theme(axis.title = element_text(size=14),axis.text = element_text(size=14), legend.text = element_text(size=14), legend.title = element_text(size=14), legend.position = "top", panel.grid = element_blank())+
+   xlab("log(Area of PPP1R1A)")+
+  ylab("scaled Abs of LPE(22:6)")+
+   geom_text(x=26.7,y=-1,label="R=-0.592, P=0.001", check_overlap = TRUE, size=5)
+
+a=ggplot(data_ipsc, aes(x=`EML4`,y=`LPE(22:6)`))+
+  geom_point(aes(color=Type, fill=Type), size=3)+
+  scale_color_manual(values=c("seagreen3","tomato1", "slateblue1"), labels=c("Control","AAD","SAD"))+
+  scale_fill_manual(values=c("seagreen3","tomato1", "slateblue1"), guide=FALSE)+theme_bw()+
+geom_smooth(method = "lm", se = TRUE, color = "black", fill = "gray70") +
+  guides(color=guide_legend(override.aes = list(size=5)))+
+  theme(axis.title = element_text(size=14),axis.text = element_text(size=14), legend.text = element_text(size=14), legend.title = element_text(size=14), legend.position = "top", panel.grid = element_blank())+
+   xlab("log(Area of EML4)")+
+  ylab("scaled Abs of LPE(22:6)")+
+  geom_text(x=25.5,y=-1,label="R=-0.605, P=8.1e-04", check_overlap = TRUE, size=5)
+
+
+a
+b
+c
+
+ggarrange(a,b,c, ncol=2, nrow=2)
+
+#ggarrange(a,b,c, ncol=3, nrow=1, common.legend = TRUE, legend = "top")
+
+data_ipsc<-data_ipsc %>% unite(sample, c("matched.to.ID.Ips.neurons","Type"), sep="_") %>% column_to_rownames("sample")
+
+
+library(Hmisc) # provide p value
+cor_2 <- rcorr(x=as.matrix(data_ipsc[,c(1:27)]), y=as.matrix(data_ipsc[,c(28:44)]),type="pearson")
+
+
+#extracting the p values and correlation coefficients from the output
+str(cor_2)
+cor_2$P
+
+flat_cor_mat <- function(cor_r, cor_p){
+  #This function provides a simple formatting of a correlation matrix
+  #into a table with 4 columns containing :
+  # Column 1 : row names (variable 1 for the correlation test)
+  # Column 2 : column names (variable 2 for the correlation test)
+  # Column 3 : the correlation coefficients
+  # Column 4 : the p-values of the correlations
+  library(tidyr)
+  library(tibble)
+  cor_r <- rownames_to_column(as.data.frame(cor_r), var = "row")
+  cor_r <- gather(cor_r, column, cor, -1)
+  cor_p <- rownames_to_column(as.data.frame(cor_p), var = "row")
+  cor_p <- gather(cor_p, column, p, -1)
+  cor_p_matrix <- left_join(cor_r, cor_p, by = c("row", "column"))
+  cor_p_matrix
+}
+
+my_cor_matrix <- flat_cor_mat(cor_2$r, cor_2$P)
+my_cor_matrix_1<-my_cor_matrix %>% filter(column %in% de_name$lipids) %>% filter(!row %in% de_name$lipids) %>% filter(p<0.1) %>% left_join(dplyr::select(wgcna, metabolite_name,moduleColor), by=c("column"="metabolite_name")) %>% filter(!moduleColor=="grey")%>% left_join(Abeta, by=c("row"="pt"))
+
+
+cor_hr<-my_cor_matrix_1 %>% mutate(direction=ifelse(cor<0,"royalblue","tomato1")) %>% mutate(weight=abs(cor)) 
+
+colnames(cor_hr)[1:2]<-c("from","to")
+#cor_hr$from<-recode(cor_hr$from, "yellow"="gold2","green"="seagreen","greenyellow"="green2","cyan"="cyan3")
+
+#cor_hr$to<-recode(cor_hr$to, "yellow"="gold2","green"="seagreen","greenyellow"="green2","cyan"="cyan3")
+
+edges=dplyr::select(cor_hr, from, to, weight, direction)
+
+nodes<-data.frame(name=unique(c(cor_hr$from,cor_hr$to)))
+nodes<-nodes %>% mutate(color=case_when(name=="LPE(22:6)"~ "#ff7f0e",
+                                        name=="LPE(20:4)"~ "#ff7f0e",
+                                        name=="LPE(22:5)"~ "#0000FF",
+                                        name=="LPE(22:4)"~ "#ff7f0e",
+                                        name=="LPC(22:6)"~ "#0000FF",
+                                        name=="LPC(15:0)"~ "#0000FF",
+                                        name=="LPE(18:1)"~ "#ff7f0e",
+                                        name=="LPC(16:1)"~ "#ff7f0e",
+                                        name=="LPC(16:0)"~ "#ff7f0e",
+                                        name=="LPC(18:1)"~ "#ff7f0e", 
+                                        name=="LPC(20:4)"~ "#ff7f0e",
+                                        name=="TG(18:1_18:1_20:4)" ~ "#d62728",
+                                        name=="Cer(m38:1+O)" ~ "grey",
+                                        name=="PE(16:0p_18:1)" ~ "grey",
+                                        name=="PE(18:2p_18:1)"~ "grey",
+                                        name=="PC(18:0_18:0)"~ "#1f77b4",
+                                        name=="PC(16:1_22:6)"~ "grey",
+                                        name=="PI(18:1_18:2)"~ "#8c564b",
+                                        name=="PE(16:1e_20:3)"~ "grey",
+                                        name=="TG(18:0_20:1_20:4)"~ "#d62728",
+                                        name=="PC(15:0_18:2)" ~ "#2ca02c",
+                                        name %in% c("PPP1CA","PPP1R1A")~ "#ED90A4",
+                                        name %in% c("PSMC6","PSMD10")~ "#D3A263",
+                                        name %in% c("BASP1","SYN1","GLS","CHGA","SNCG")~ "#99B657",
+                                        name %in% c("MYL12A","STMN1")~ "#33C192",
+                                        name %in% c("HNRNPA2B1","HNRNPC","HNRNPDL","HNRNPH1","HNRNPU","CARHSP1","FUS","ERH","KHSRP","PA2G4","SRP72")~ "#00BDCE",
+                                        name %in% c("RARS1","HSD17B10","HSD17B12","ACSL4")~ "#94A9EC",
+                                        name =="EML4"~ "#DC91DB")) %>% 
+                 mutate(data=case_when(str_detect(nodes$name,"LP") ~ "Lipid Module", 
+                                       str_detect(nodes$name,"PC") ~ "Lipid Module",
+                                        str_detect(nodes$name,"PE") ~ "Lipid Module",
+                                        str_detect(nodes$name,"PI") ~ "Lipid Module",
+                                       str_detect(nodes$name,"TG") ~ "Lipid Module",TRUE~ "iPSC Protein"))
+#nodes[20,3]<-"iPSC Protein"
+
+nrow(nodes); length(unique(nodes$name))  #23
+nrow(edges); nrow(unique(edges[,c("from", "to")]))  #45
+
+links <- aggregate(edges[,3], edges[,-3], sum)
+links <- links[order(links$from, links$to),]
+colnames(links)[4] <- "weight"
+rownames(links) <- NULL
+
+net <- graph_from_data_frame(d=links, vertices=nodes, directed=F)
+net
+E(net)
+V(net)
+E(net)$direction
+net <- igraph::simplify(net, remove.multiple = FALSE, remove.loops = TRUE)
+
+deg <- eigen_centrality(net, directed=FALSE)
+
+V(net)$size <- (log(deg$vector+1)*20)
+
+V(net)$size
+E(net)$width <- E(net)$weight*5
+
+E(net)$edge.color <- E(net)$direction
+
+
+l=layout_in_circle(net)
+l <- norm_coords(l, ymin=-1, ymax=1, xmin=-1, xmax=1) #default -- scaled
+plot(net, vertex.label = V(net)$name, edge.arrow.size=.1, edge.color=E(net)$direction,
+     layout=l*1.1,vertex.label.dist=1.5, vertex.label.color="black", vertex.frame.color=V(net)$color, vertex.label.degree=pi/2, rescale=F)
+
+
+
+color_col<-structure(nodes$color, names=nodes$name)
+
+
+
+
+graph<-as_tbl_graph(net) %>% mutate(degree=centrality_eigen())
+
+
+p=ggraph(graph, layout = "fr") + 
+geom_edge_link(aes(edge_width=weight, colour = edge.color), alpha=0.5) + 
+geom_node_point(aes(fill=name, color=name, size=degree, shape=data))+
+  scale_edge_color_manual(values=c("royalblue","tomato1"), name="Direction", label=c("Negative", "Positive"))+
+  scale_edge_width(range=c(1,2), name="Correlation",  breaks=c(0.4,0.6))+
+  scale_fill_manual(values=color_col,guide=FALSE)+
+  scale_color_manual(values=color_col,guide=FALSE)+
+  scale_size_continuous(range=c(3,6),guide=FALSE)+
+  scale_shape_manual(values=c(21,22),"Dataset")+
+  guides(edge_width=guide_legend(nrow=3, byrow=TRUE, title.position = "top"),
+         shape=guide_legend(nrow=2, byrow=TRUE, title.position = "top", override.aes=list(size=4, color="grey", fill="grey")),
+         edge_color = guide_legend(nrow=2, byrow=TRUE, title.position="top",override.aes = list(edge_width = 5)))+
+  #coord_cartesian(xlim=c(-5,5), ylim=c(-5,5))+theme_bw()+  # use the ggplot black and white theme
+    theme(
+      axis.text.x = element_blank(),  # remove x-axis text
+      axis.text.y = element_blank(), # remove y-axis text
+      axis.ticks = element_blank(),  # remove axis ticks
+      axis.title.x = element_blank(), # remove x-axis labels
+      axis.title.y = element_blank(), # remove y-axis labels
+      panel.background = element_blank(), 
+      panel.border =element_blank(), 
+      panel.grid.major = element_blank(),  #remove major-grid labels
+      panel.grid.minor = element_blank(),  #remove minor-grid labels
+      plot.background = element_blank(),
+      legend.text = element_text(size=18),
+      legend.title = element_text(size=20),
+      legend.position = "bottom",
+      plot.margin =  unit(c(1,1,1,1), "cm"))
+
+
+p+geom_node_text( aes(label = name),size=4, repel=TRUE)
+
+
+
+plot.new()
+op <- par(family = "sans")
+
+legend("right", legend=c("M2","M5","M8","M13","PP1","Proteasome","Synapse","Cytoskeleton","RNA binding/splicing","Microtubule"), border="white",title="Module/Pathway",bty="n", text.font = 1,pch=c(15,15,15,15,19,19,19,19,19,19,19,19,19), col=c("#ff7f0e","#2ca02c","#d62728","#0000FF","#ED90A4", "#D3A263", "#99B657", "#33C192", "#00BDCE", "#DC91DB"),pt.cex=1.5, title.cex=1.1,y.intersp=1.3, plot=TRUE)
+
+
+
+par(op)
+```
+# Table statistics
+```{r}
+library(agricolae)
+data_lsd<-data_clinical %>% dplyr::select(`CLASS:Condition`,GlobalCogFunc,Reagan,CERAD,Braak,Age,tangles,pmi,bmi,gpath,educ, amyloid)
+
+# =====LSD TEST=====
+
+# Rename the grouping variable for easier reference
+colnames(data_lsd)[1] <- "Condition"
+
+
+# Loop through each variable (excluding the grouping variable)
+for (var in names(data_lsd)[-1]) {
+  cat("\n===== Variable:", var, "=====\n")
+  
+  # Create a temporary data frame for the current variable
+  temp_df <- data.frame(
+    score = data_lsd[[var]],
+    group = data_lsd$Condition
+  )
+  
+  # Fit one-way ANOVA
+  model <- aov(score ~ group, data = temp_df)
+  
+  # Print ANOVA summary
+  print(summary(model))
+  
+  # Perform Fisher's LSD test
+ # lsd_result <- LSD.test(model, "group", group=FALSE)
+  
+  
+# Convert comparison results to a data frame
+#comparison_df <- as.data.frame(lsd_result$comparison)
+
+
+
+  # Export to CSV (file name includes variable name)
+  #write.csv(comparison_df, file = paste0("LSD_comparison_", var, ".csv"), row.names = #TRUE)
+  
+
+  # Print pairwise comparisons with p-values
+  #cat("\n--- Pairwise Comparisons (p-values) ---\n")#
+#print(lsd_result$comparison)
+
+  
+}
+
+
+
+```
+
+
+
+
+
+
+
+
